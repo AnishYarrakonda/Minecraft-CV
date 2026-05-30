@@ -1,0 +1,21 @@
+[
+  { "key": "ctrl+enter", "command": "submitInput" },
+  { "key": "shift+enter", "command": "insertNewline" },
+  { "key": "ctrl+c", "command": "cancelOrInterrupt" },
+  { "key": "ctrl+d", "command": "exit" },
+  { "key": "ctrl+l", "command": "clearScreen" },
+  { "key": "ctrl+r", "command": "reverseSearchHistory" },
+  { "key": "up", "command": "previousHistory" },
+  { "key": "down", "command": "nextHistory" },
+  { "key": "ctrl+u", "command": "deleteToLineStart" },
+  { "key": "ctrl+k", "command": "deleteToLineEnd" },
+  { "key": "ctrl+w", "command": "deleteWordBackward" },
+  { "key": "ctrl+a", "command": "moveToLineStart" },
+  { "key": "ctrl+e", "command": "moveToLineEnd" },
+  { "key": "alt+left", "command": "moveWordLeft" },
+  { "key": "alt+right", "command": "moveWordRight" },
+  { "key": "ctrl+t", "command": "toggleTodoPanel" },
+  { "key": "shift+tab", "command": "cyclePermissionMode" },
+  { "key": "ctrl+v", "command": "pasteImage" },
+  { "key": "escape escape", "command": "editPreviousMessage" }
+]

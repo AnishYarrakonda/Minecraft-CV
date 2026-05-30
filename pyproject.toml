@@ -1,0 +1,76 @@
+[project]
+name = "minecraft-cv"
+version = "0.1.0"
+description = "Real-time webcam gesture -> Minecraft keyboard/mouse controller."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "anish" }]
+
+# Heavy runtime deps. Note: capture/tracking/mac_emitter import these LAZILY so the
+# deterministic gesture/joystick/config/pipeline test suite runs without a camera,
+# without MediaPipe, and without OS-input libraries installed.
+dependencies = [
+  "numpy>=1.25",
+  "pydantic-settings>=2",
+  "PyYAML>=6",
+  "mediapipe>=0.10",
+  "opencv-python>=4.8",
+  "pynput>=1.7",
+  "pyobjc-framework-Quartz>=10; sys_platform == 'darwin'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov", "ruff>=0.4", "mypy>=1.10", "py-spy"]
+torch = ["torch>=2.2"]
+# Minimal set sufficient to run the deterministic (camera-free) test suite.
+test-min = ["numpy>=1.25", "pydantic-settings>=2", "PyYAML>=6", "pytest>=7"]
+
+[project.scripts]
+mcv-run = "minecraft_cv.cli:main_run"
+mcv-calibrate = "minecraft_cv.cli:main_calibrate"
+mcv-analyze = "minecraft_cv.cli:main_analyze"
+mcv-bench = "minecraft_cv.cli:main_bench"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# --- ruff -------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "D", "UP", "B", "SIM", "NPY"]
+ignore = ["D203", "D213"]  # mutually-exclusive docstring rules; keep D211/D212
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["minecraft_cv"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]      # tests are self-documenting; don't require docstrings
+"scripts/*" = ["D"]
+
+# --- mypy -------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+warn_unused_ignores = false  # optional libs may or may not be present locally
+
+[[tool.mypy.overrides]]
+module = ["cv2.*", "mediapipe.*", "pynput.*", "Quartz.*", "objc.*", "torch.*", "yaml.*"]
+ignore_missing_imports = true
+
+# --- pytest -----------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

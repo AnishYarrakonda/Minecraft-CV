@@ -1,0 +1,81 @@
+# Default configuration for minecraft_cv.
+# All tunable values live here; gesture/joystick code must never hold magic numbers.
+# Loaded into a typed pydantic `Settings` model (see src/minecraft_cv/config.py).
+
+camera:
+  index: 0                  # Continuity Camera may steal index 0 -> a startup check warns
+  width: 640
+  height: 480
+  fps: 30
+  backend: avfoundation     # forced on macOS
+
+tracking:
+  backend: mediapipe        # mediapipe | yolo
+  device: auto              # auto | mps | cuda | cpu  (mediapipe ignores this; CPU-only)
+  input_resolution: [256, 256]
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  max_num_hands: 2
+
+gestures:
+  left_hand:
+    jump:                   # thumb -> index
+      finger: index
+      t_engage: 0.30
+      t_release: 0.45
+    sneak:                  # thumb -> middle
+      finger: middle
+      t_engage: 0.30
+      t_release: 0.45
+  right_hand:
+    attack:                 # thumb -> index
+      finger: index
+      t_engage: 0.30
+      t_release: 0.45
+    use:                    # thumb -> middle
+      finger: middle
+      t_engage: 0.30
+      t_release: 0.45
+
+# --- V2 (defined for forward-readiness; NOT wired into the MVP pipeline) -----
+# Ring/pinky hotbar gestures are bypassed in the MVP per .claude/rules/gestures.md.
+# Uncomment + implement pulse/cooldown debouncing (gestures.md) before enabling.
+#   left_hand:
+#     inventory:            # full fist -> mode switch (E)
+#       finger: fist
+#       t_engage: 0.20
+#       t_release: 0.35
+#   right_hand:
+#     hotbar_next:          # thumb -> ring  (momentary pulse + cooldown)
+#       finger: ring
+#       t_engage: 0.30
+#       t_release: 0.45
+#     hotbar_prev:          # thumb -> pinky (momentary pulse + cooldown)
+#       finger: pinky
+#       t_engage: 0.30
+#       t_release: 0.45
+
+joystick:
+  deadzone_radius: 0.05     # normalized units; sphere radius (not a box)
+  sensitivity: 2.0
+  accel_exponent: 2.0       # exponential acceleration curve (mitigates Gorilla Arm)
+  anchor: wrist             # wrist (landmark 0) | middle_mcp (landmark 9)
+  max_output: 1.0           # clamp on per-axis joystick magnitude after accel curve
+
+input:
+  enabled: false            # NullEmitter unless explicitly enabled (--input overrides)
+  mouse_delta_scale: 5.0    # joystick units -> CGEvent relative pixels for camera look
+  scroll_repeat_rate_hz: 8  # hotbar pulse re-emit rate while a pinch is held (V2)
+  key_repeat_guard_ms: 50   # minimum interval between repeated discrete events
+
+# gesture -> game key/button binding (loaded from config, never hardcoded in src/)
+bindings:
+  jump: space
+  sneak: shift
+  attack: mouse_left
+  use: mouse_right
+  inventory: e
+
+debug:
+  overlay: false            # --debug-overlay overrides
+  log_level: WARNING        # never INFO-per-frame; rate-limited debug counters only

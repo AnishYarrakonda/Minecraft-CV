@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "deny": [
+      "Read(//Users/anish_1_2_3/Documents/minecraft_cv/.env)",
+      "Read(//Users/anish_1_2_3/Documents/minecraft_cv/**/.env)",
+      "Read(//Users/anish_1_2_3/Documents/minecraft_cv/**/*.pem)",
+      "Read(//Users/anish_1_2_3/Documents/minecraft_cv/secrets/**)",
+      "Read(//Users/anish_1_2_3/.ssh/**)",
+      "Read(//Users/anish_1_2_3/.aws/**)",
+
+      "Bash(sudo:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(chmod 777:*)",
+      "Bash(chown:*)",
+      "Bash(dd:*)",
+      "Bash(mkfs:*)",
+      "Bash(diskutil:*)",
+      "Bash(launchctl:*)",
+      "Bash(defaults write:*)",
+      "Bash(killall:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git clean -fdx:*)",
+      "Bash(poetry publish:*)",
+      "WebFetch"
+    ]
+  },
+  "env": {
+    "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+    "PYTORCH_MPS_HIGH_WATERMARK_RATIO": "0.0",
+    "OPENCV_LOG_LEVEL": "ERROR",
+    "OPENCV_VIDEOIO_PRIORITY_AVFOUNDATION": "1",
+    "TOKENIZERS_PARALLELISM": "false",
+    "OMP_NUM_THREADS": "4",
+    "PYTHONUNBUFFERED": "1"
+  },
+  "includeCoAuthoredBy": false,
+  "cleanupPeriodDays": 30
+}
