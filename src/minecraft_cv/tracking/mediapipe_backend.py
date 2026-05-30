@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 
 # Silence MediaPipe C++ glog warnings (e.g. NORM_RECT without IMAGE_DIMENSIONS)
-os.environ["GLOG_minloglevel"] = "2"
+os.environ["GLOG_MINLOGLEVEL"] = "2"
 
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
 

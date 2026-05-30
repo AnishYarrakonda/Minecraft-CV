@@ -171,7 +171,7 @@ class _GestureTrigger:
         fields = _SIGNAL_EXTRACTORS[self.gesture_type]
         values = [getattr(fs, f) for f in fields]
         # For multi-finger gestures, ALL must be extended -> use min.
-        return min(values)
+        return float(min(values))
 
     def _check_exclusion(self, fs: FingerState) -> bool:
         """Check if any exclusion fingers are extended (would suppress this gesture)."""
@@ -180,10 +180,7 @@ class _GestureTrigger:
             return False
         # Gesture is excluded if any non-required finger is well above the release
         # threshold (indicating it's clearly extended, not just noise).
-        for f in excl_fields:
-            if getattr(fs, f) > self.t_engage:
-                return True
-        return False
+        return any(getattr(fs, f) > self.t_engage for f in excl_fields)
 
 
 class ExtensionStateMachine:

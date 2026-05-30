@@ -33,6 +33,7 @@ mcv run --no-input --debug-overlay
 
 Run in live mode (controls your mouse and keyboard):
 ```bash
+mcv calibrate --apply
 mcv run --input
 ```
 
@@ -40,43 +41,41 @@ mcv run --input
 
 Here is how you control the game using gestures with your hands:
 
-### 🎮 Joysticks (Movement & Camera)
-*   **Movement (WASD) - Left Hand**: Moving your hand relative to its initial center point (neutral pose) drives translation.
-    *   **Forward (`W`)**: Move hand **up** in the camera frame.
-    *   **Back (`S`)**: Move hand **down** in the camera frame.
-    *   **Left (`A`)**: Move hand **left** in the camera frame.
-    *   **Right (`D`)**: Move hand **right** in the camera frame.
-*   **Camera Look (Mouse Move) - Right Hand**: Moving your hand relative to its initial center point drives the camera look direction.
+### 🎮 Calibrated Palm-Normal Thumbsticks
+Run `mcv calibrate --apply` before gameplay. Palm-normal mode refuses to start until calibrated neutral values exist in `config.yaml`.
+
+*   **Movement (WASD) - Left Hand**: Palm-normal tilt drives movement from calibrated rest.
+    *   **Forward (`W`)**: Tilt the palm normal down.
+    *   **Back (`S`)**: Tilt the palm normal up.
+    *   **Left (`A`)**: Tilt the palm normal left.
+    *   **Right (`D`)**: Tilt the palm normal right.
+*   **Camera Look (Mouse Move) - Right Hand**: The right palm normal uses the same `x/y` axes for look. Output is zero inside the calibrated deadzone and scales linearly as the palm normal tilts farther from neutral.
 
 ---
 
-### 🖐️ Left-Hand Extension Gestures (Discrete Actions)
-Triggered by extending specific fingers from a closed fist:
-*   **Jump (`Space`)**: Extend your **Thumb** outward (`thumb_out`).
-*   **Sneak (`Shift`)**: Extend your **Index Finger** only (`index_only`).
-*   **Sprint (`Ctrl`)**: Extend your **Middle Finger** only (`middle_only`).
-*   **Inventory (`E`)**: Extend both your **Index and Middle Fingers** (Peace Sign, `index_middle`). *[Pulse/One-shot]*
-*   **Throw Item (`Q`)**: Extend your **Ring Finger** only (`ring_only`). *[Pulse/One-shot]*
-*   **Switch Offhand (`F`)**: Extend your **Pinky Finger** only (`pinky_only`). *[Pulse/One-shot]*
+### 🖐️ Left-Hand Actions
+All actions are holds. A quick hold/release acts like a tap in Minecraft.
+
+*   **Jump (`Space`)**: Pinch **Thumb** to **Index Finger**.
+*   **Inventory (`E`)**: Pinch **Thumb** to **Middle Finger**.
+*   **Throw Item (`Q`)**: Pinch **Thumb** to **Ring Finger**.
+*   **Switch Offhand (`F`)**: Pinch **Thumb** to **Pinky Finger**.
+*   **Sneak (`Shift`)**: Curl **Ring + Pinky** on the left hand. This suppresses the left ring/pinky pinches while held, but index/middle pinches remain available.
 
 ---
 
-### 🤏 Right-Hand Pinch Gestures (Interactions)
+### 🤏 Right-Hand Holds
 Triggered by pinching your thumb to specific fingertips:
 *   **Attack/Mine (`Left Click`)**: Pinch **Thumb** to **Index Finger**.
 *   **Use/Place (`Right Click`)**: Pinch **Thumb** to **Middle Finger**.
 *   **Hotbar Scroll Up (`Scroll Up`)**: Pinch **Thumb** to **Ring Finger**.
 *   **Hotbar Scroll Down (`Scroll Down`)**: Pinch **Thumb** to **Pinky Finger**.
+*   **Sprint (`Ctrl`)**: Curl **Ring + Pinky** on the right hand. This suppresses right ring/pinky hotbar pinches while held, but attack/use remain available.
 
 ---
 
 ### 💼 Special Modes
-*   **Inventory Mode Toggle**: Fully open **both hands** (spread all fingers) to toggle menu navigation mode. When active:
-    *   WASD movement is paused.
-    *   Moving your right hand drives the macOS mouse cursor in absolute screen coordinates.
-    *   Right-hand index pinch acts as a Left Click (and held pinch acts as click-and-drag).
-    *   Right-hand middle pinch acts as a Right Click.
-    *   Fully open both hands again to return to normal gameplay control.
+The older two-open-palms inventory cursor mode is disabled by default because open palms are now the neutral gameplay pose. It remains available in configuration for experiments, but the default inventory action is the left-hand thumb-to-middle pinch (`E` hold).
 
 ## Commands
 
@@ -91,7 +90,7 @@ Triggered by pinching your thumb to specific fingertips:
 
 ## Status
 
-Fully implemented: wrist-anchor spatial joysticks (LH -> WASD, RH -> mouse look), extension gestures for left hand, pinch gestures for right hand, Schmitt triggers, dynamic deadzones, sprint-via-velocity, hotbar gestures, and inventory mode.
+Fully implemented: calibrated palm-normal virtual thumbsticks (LH -> WASD, RH -> mouse look), detector-backed hold gestures for both hands, pinch/curl-combo detectors with suppression, Schmitt triggers, hotbar gestures, sprint-via-velocity, and optional legacy inventory cursor mode.
 
 ## Safety Invariants
 

@@ -3,10 +3,10 @@
 Loads ``config.yaml`` into a validated pydantic ``Settings`` model. Every tunable value
 lives here so gesture/joystick/input code never holds magic numbers. The most important
 guarantee enforced at construction time is hard-invariant #1: ``t_release > t_engage`` for
-every configured pinch gesture (see ``.claude/rules/gestures.md``).
+the lower-is-engaged detector gestures (pinches and curled-finger detectors).
 
-All distance thresholds are **unitless ratios** (thumb-to-fingertip distance normalized by
-hand scale), so they are invariant to how far the hand is from the camera.
+Pinch distances are normalized by hand scale, and calibrated palm-normal joystick signals
+are translation-invariant, so thresholds stay stable as the hand moves in the camera frame.
 """
 
 from __future__ import annotations
@@ -19,7 +19,12 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 FingerName = Literal["index", "middle", "ring", "pinky", "fist"]
+DetectorFingerName = Literal["thumb", "index", "middle", "ring", "pinky"]
+CurlFingerName = Literal["index", "middle", "ring", "pinky"]
+GestureDetectorName = Literal["pinch", "curl_only", "curl_combo"]
+GestureMode = Literal["hold", "toggle"]
 Anchor = Literal["wrist", "middle_mcp"]
+JoystickMode = Literal["palm_normal", "wrist_rotation"]
 ExtensionGestureType = Literal[
     "thumb_out", "index_only", "middle_only", "index_middle", "ring_only", "pinky_only"
 ]
@@ -140,6 +145,53 @@ class ExtensionThresholds(BaseModel):
         return self
 
 
+class GestureDetectorSettings(BaseModel):
+    """Config-driven gesture detector entry.
+
+    The virtual dual-thumbstick rewrite treats every discrete gesture as detector-backed.
+    ``pinch``, ``curl_only``, and ``curl_combo`` all use lower-is-engaged Schmitt semantics:
+    ``t_release > t_engage``. For ``pinch`` the signal is normalized thumb-to-fingertip
+    distance; for ``curl_only`` it is the curled finger's extension ratio, gated by the listed
+    ``open_fingers`` staying open; for ``curl_combo`` it is the highest extension ratio among
+    all required curled fingers, so every listed finger must be down.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    detector: GestureDetectorName
+    finger: DetectorFingerName
+    t_engage: float = Field(gt=0.0)
+    t_release: float = Field(gt=0.0)
+    mode: GestureMode = "hold"
+    open_fingers: tuple[DetectorFingerName, ...] = ()
+    open_threshold: float = Field(default=1.1, gt=0.0)
+    curl_fingers: tuple[CurlFingerName, ...] = ()
+    conflict_group: str | None = None
+    suppresses: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _check_detector(self) -> GestureDetectorSettings:
+        if not self.t_release > self.t_engage:
+            raise ValueError(
+                f"t_release ({self.t_release}) must be strictly greater than "
+                f"t_engage ({self.t_engage}) for {self.detector!r} gestures."
+            )
+        if self.detector == "pinch" and self.finger == "thumb":
+            raise ValueError("pinch gestures target index/middle/ring/pinky, not thumb")
+        if self.detector == "curl_only" and self.finger in self.open_fingers:
+            raise ValueError("curl_only target finger cannot also be required open")
+        if self.detector == "curl_combo":
+            required = self.curl_fingers or (self.finger,)
+            if self.finger == "thumb" and not self.curl_fingers:
+                raise ValueError("curl_combo gestures require non-thumb curl_fingers")
+            overlap = set(required).intersection(self.open_fingers)
+            if overlap:
+                raise ValueError(
+                    f"curl_combo fingers cannot also be required open: {sorted(overlap)}"
+                )
+        return self
+
+
 def _default_left_gestures() -> dict[str, ExtensionThresholds]:
     return {
         "jump": ExtensionThresholds(type="thumb_out", t_engage=1.2, t_release=0.9),
@@ -166,32 +218,109 @@ def _default_right_gestures() -> dict[str, GestureThresholds]:
     }
 
 
-class GestureSettings(BaseModel):
-    """Per-hand maps of gesture-name -> Schmitt thresholds.
+def _default_left_detector_gestures() -> dict[str, GestureDetectorSettings]:
+    return {
+        "jump": GestureDetectorSettings(
+            detector="pinch", finger="index", t_engage=0.30, t_release=0.45
+        ),
+        "inventory": GestureDetectorSettings(
+            detector="pinch", finger="middle", t_engage=0.30, t_release=0.45
+        ),
+        "throw_item": GestureDetectorSettings(
+            detector="pinch", finger="ring", t_engage=0.30, t_release=0.45
+        ),
+        "switch_offhand": GestureDetectorSettings(
+            detector="pinch", finger="pinky", t_engage=0.30, t_release=0.45
+        ),
+        "sneak": GestureDetectorSettings(
+            detector="curl_combo",
+            finger="pinky",
+            t_engage=0.95,
+            t_release=1.05,
+            mode="hold",
+            curl_fingers=("ring", "pinky"),
+            suppresses=("throw_item", "switch_offhand"),
+        ),
+    }
 
-    Left hand uses extension-based gestures (finger combinations from closed fist).
-    Right hand uses pinch-based gestures (thumb-to-fingertip distances).
-    """
+
+def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
+    return {
+        "attack": GestureDetectorSettings(
+            detector="pinch",
+            finger="index",
+            t_engage=0.30,
+            t_release=0.45,
+            conflict_group="primary_click",
+        ),
+        "use": GestureDetectorSettings(
+            detector="pinch",
+            finger="middle",
+            t_engage=0.30,
+            t_release=0.45,
+            conflict_group="primary_click",
+        ),
+        "hotbar_next": GestureDetectorSettings(
+            detector="pinch",
+            finger="ring",
+            t_engage=0.30,
+            t_release=0.45,
+            conflict_group="hotbar_scroll",
+        ),
+        "hotbar_prev": GestureDetectorSettings(
+            detector="pinch",
+            finger="pinky",
+            t_engage=0.30,
+            t_release=0.45,
+            conflict_group="hotbar_scroll",
+        ),
+        "sprint": GestureDetectorSettings(
+            detector="curl_combo",
+            finger="ring",
+            t_engage=0.95,
+            t_release=1.05,
+            curl_fingers=("ring", "pinky"),
+            suppresses=("hotbar_next", "hotbar_prev"),
+        ),
+    }
+
+
+class GestureSettings(BaseModel):
+    """Per-hand maps of gesture-name -> detector-backed hold gesture config."""
 
     model_config = {"extra": "forbid"}
 
-    left_hand: dict[str, ExtensionThresholds] = Field(
-        default_factory=_default_left_gestures
+    left_hand: dict[str, GestureDetectorSettings] = Field(
+        default_factory=_default_left_detector_gestures
     )
-    right_hand: dict[str, GestureThresholds] = Field(
-        default_factory=_default_right_gestures
+    right_hand: dict[str, GestureDetectorSettings] = Field(
+        default_factory=_default_right_detector_gestures
     )
+
+
+class PalmNormalSettings(BaseModel):
+    """Calibrated palm-normal joystick parameters."""
+
+    model_config = {"extra": "forbid"}
+
+    left_neutral: tuple[float, float] | None = None
+    right_neutral: tuple[float, float] | None = None
+    deadzone: float = Field(default=0.05, ge=0.0)
+    left_sensitivity: tuple[float, float] = (2.0, 2.0)
+    right_sensitivity: tuple[float, float] = (2.0, 2.0)
 
 
 class JoystickSettings(BaseModel):
-    """Spatial-joystick deadzone, sensitivity, and acceleration parameters.
+    """Spatial-joystick mode, calibration, deadzone, and sensitivity parameters.
 
-    Units are normalized landmark coordinates ([0, 1] in frame space). The deadzone is a
-    sphere radius, not a box half-width, so diagonal directions are not biased.
+    ``palm_normal`` is the default gameplay mode. The older ``wrist_rotation`` fields remain
+    available for experiments and for the legacy calibration path.
     """
 
     model_config = {"extra": "forbid"}
 
+    mode: JoystickMode = "palm_normal"
+    palm_normal: PalmNormalSettings = Field(default_factory=PalmNormalSettings)
     deadzone_radius: float = Field(default=0.05, ge=0.0)
     sensitivity: float = Field(default=2.0, gt=0.0)
     accel_exponent: float = Field(default=2.0, gt=0.0)
@@ -256,8 +385,8 @@ class SprintVelocitySettings(BaseModel):
     A quick forward push of the left hand toward the camera engages Sprint (``Ctrl`` held
     alongside ``W``); it holds while the hand stays forward and releases on retreat. Because
     MediaPipe's ``z`` axis is the least reliable landmark coordinate, this is **disabled by
-    default** — enable it deliberately, and consider dropping the static ``sprint`` extension
-    gesture from ``gestures.left_hand`` so the two do not both drive ``Ctrl``.
+    default**. Prefer the right-hand ring+pinky curl sprint gesture unless you are
+    experimenting with velocity sprint.
     """
 
     model_config = {"extra": "forbid"}
@@ -294,7 +423,7 @@ class InventorySettings(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    enabled: bool = True
+    enabled: bool = False
     open_threshold: float = Field(default=1.1, gt=0.0)
     """Finger extension ratio above which a finger counts as extended for the open-palm pose."""
     thumb_open_threshold: float = Field(default=0.9, gt=0.0)

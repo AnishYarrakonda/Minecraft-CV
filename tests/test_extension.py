@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -16,9 +16,15 @@ def gestures() -> dict[str, ExtensionThresholds]:
         "jump": ExtensionThresholds(type="thumb_out", t_engage=1.2, t_release=0.9),
         "sneak": ExtensionThresholds(type="index_only", t_engage=1.15, t_release=1.05),
         "sprint": ExtensionThresholds(type="middle_only", t_engage=1.15, t_release=1.05),
-        "inventory": ExtensionThresholds(type="index_middle", t_engage=1.15, t_release=1.05, pulse=True),
-        "throw_item": ExtensionThresholds(type="ring_only", t_engage=1.15, t_release=1.05, pulse=True),
-        "switch_offhand": ExtensionThresholds(type="pinky_only", t_engage=1.15, t_release=1.05, pulse=True),
+        "inventory": ExtensionThresholds(
+            type="index_middle", t_engage=1.15, t_release=1.05, pulse=True
+        ),
+        "throw_item": ExtensionThresholds(
+            type="ring_only", t_engage=1.15, t_release=1.05, pulse=True
+        ),
+        "switch_offhand": ExtensionThresholds(
+            type="pinky_only", t_engage=1.15, t_release=1.05, pulse=True
+        ),
     }
 
 
@@ -27,12 +33,12 @@ def test_thumb_out_fires_jump(
     make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
-    
+
     # Curled thumb doesn't engage
     lm = make_extended_landmarks({}, thumb_ext=0.5)
     events = sm.update(lm)
     assert not events
-    
+
     # Extend thumb past t_engage (1.2)
     lm = make_extended_landmarks({}, thumb_ext=1.5)
     sm.update(lm)
@@ -40,11 +46,11 @@ def test_thumb_out_fires_jump(
     assert len(events) == 1
     assert events[0].gesture == "jump"
     assert events[0].action == KEY_DOWN
-    
+
     # Stay extended (no new events)
     events = sm.update(lm)
     assert not events
-    
+
     # Drop below t_release (0.9)
     lm = make_extended_landmarks({}, thumb_ext=0.5)
     sm.update(lm)
@@ -59,7 +65,7 @@ def test_index_only_fires_sneak(
     make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
-    
+
     # Extend index past 1.15
     lm = make_extended_landmarks({"index": 1.3})
     sm.update(lm)
@@ -74,7 +80,7 @@ def test_middle_only_fires_sprint(
     make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
-    
+
     lm = make_extended_landmarks({"middle": 1.3})
     sm.update(lm)
     events = sm.update(lm)
@@ -88,7 +94,7 @@ def test_peace_sign_fires_inventory(
     make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
-    
+
     lm = make_extended_landmarks({"index": 1.3, "middle": 1.3})
     sm.update(lm)
     events = sm.update(lm)
@@ -102,7 +108,7 @@ def test_exclusion_prevents_false_positive(
     make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
-    
+
     # Extend all fingers
     lm = make_extended_landmarks({
         "index": 1.3,
@@ -127,13 +133,13 @@ def test_reset_releases_held(
     make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
-    
+
     # Hold thumb_out
     lm = make_extended_landmarks({}, thumb_ext=1.5)
     sm.update(lm)
     sm.update(lm)
     assert "jump" in sm.held
-    
+
     # Reset
     events = sm.reset()
     assert len(events) == 1

@@ -11,10 +11,13 @@ from collections.abc import Callable
 
 import numpy as np
 
+from conftest import make_calibrated_settings
 from minecraft_cv.config import Settings
 from minecraft_cv.input.emitter import NullEmitter
 from minecraft_cv.pipeline import Pipeline
 from minecraft_cv.tracking.tracker import HandResult
+
+_OPEN_EXTENSIONS = {"index": 1.3, "middle": 1.3, "ring": 1.3, "pinky": 1.3}
 
 
 class _Clock:
@@ -42,7 +45,7 @@ def test_velocity_sprint_engages_ctrl_and_forward(
     make_extended_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
-    settings = Settings(
+    settings = make_calibrated_settings(
         sprint={"enabled": True, "v_sprint": 1.0, "trigger_frames": 3, "release_margin": 0.02}
     )
     emitter = NullEmitter()
@@ -50,7 +53,7 @@ def test_velocity_sprint_engages_ctrl_and_forward(
     pipe = _pipeline(settings, emitter, clock)
 
     def left_at(z: float) -> list[HandResult]:
-        lm = make_extended_landmarks(offset=(0.5, 0.5, z))
+        lm = make_extended_landmarks(extensions=_OPEN_EXTENSIONS, offset=(0.5, 0.5, z))
         return [make_hand_result(lm, "Right")]  # swapped -> physical left
 
     clock.t = 0.0
@@ -80,10 +83,11 @@ def test_velocity_sprint_disabled_by_default(
 ) -> None:
     emitter = NullEmitter()
     clock = _Clock()
-    pipe = _pipeline(Settings(), emitter, clock)
+    pipe = _pipeline(make_calibrated_settings(), emitter, clock)
     for i, z in enumerate((0.0, -0.3, -0.6, -0.9)):
         clock.t = i * 0.1
-        pipe.step([make_hand_result(make_extended_landmarks(offset=(0.5, 0.5, z)), "Right")])
+        lm = make_extended_landmarks(extensions=_OPEN_EXTENSIONS, offset=(0.5, 0.5, z))
+        pipe.step([make_hand_result(lm, "Right")])
     assert ("key_down", "ctrl") not in emitter.log
 
 
@@ -91,13 +95,16 @@ def test_velocity_sprint_releases_on_tracking_loss(
     make_extended_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
-    settings = Settings(sprint={"enabled": True, "v_sprint": 1.0, "trigger_frames": 3})
+    settings = make_calibrated_settings(
+        sprint={"enabled": True, "v_sprint": 1.0, "trigger_frames": 3}
+    )
     emitter = NullEmitter()
     clock = _Clock()
     pipe = _pipeline(settings, emitter, clock)
 
     def left_at(z: float) -> list[HandResult]:
-        return [make_hand_result(make_extended_landmarks(offset=(0.5, 0.5, z)), "Right")]
+        lm = make_extended_landmarks(extensions=_OPEN_EXTENSIONS, offset=(0.5, 0.5, z))
+        return [make_hand_result(lm, "Right")]
 
     for i, z in enumerate((0.0, -0.2, -0.4, -0.6)):
         clock.t = i * 0.1
@@ -116,49 +123,46 @@ def test_velocity_sprint_releases_on_tracking_loss(
 
 
 def test_long_dropout_then_stabilization_prevents_snap(
-    make_extended_landmarks: Callable[..., np.ndarray],
+    make_palm_normal_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     emitter = NullEmitter()
     clock = _Clock()
-    pipe = _pipeline(Settings(), emitter, clock)  # defaults: flush 100 ms, stabilize 500 ms
+    pipe = _pipeline(make_calibrated_settings(), emitter, clock)
 
     def left_at(x: float) -> list[HandResult]:
-        return [make_hand_result(make_extended_landmarks(offset=(x, 0.5, 0.0)), "Right")]
+        return [make_hand_result(make_palm_normal_landmarks(normal_xy=(x, 0.0)), "Right")]
 
     clock.t = 0.0
-    pipe.step(left_at(0.5))  # neutral
+    pipe.step(left_at(0.0))  # neutral
     clock.t = 0.01
-    assert pipe.step(left_at(0.7)).wasd_held == frozenset({"d"})  # moving right
+    assert pipe.step(left_at(0.3)).wasd_held == frozenset({"d"})  # rotating right
 
     # Long dropout (>100 ms): keys release, neutral flushed.
     clock.t = 0.2
     assert pipe.step([]).wasd_held == frozenset()
     assert "d" not in emitter.held_keys
 
-    # Re-entry far from the old neutral: during stabilization NO movement is emitted
-    # (this is what prevents the violent snap), and the neutral re-seeds here.
+    # Re-entry tilted away from calibrated neutral: during stabilization NO movement is
+    # emitted, preventing a camera/movement snap.
     clock.t = 0.25
-    assert pipe.step(left_at(0.7)).wasd_held == frozenset()
+    assert pipe.step(left_at(0.3)).wasd_held == frozenset()
     clock.t = 0.5
-    assert pipe.step(left_at(0.7)).wasd_held == frozenset()  # still stabilizing
+    assert pipe.step(left_at(0.3)).wasd_held == frozenset()  # still stabilizing
 
-    # After the 500 ms window, emission resumes — and because the neutral re-seeded at
-    # x=0.7, holding there yields no movement (no snap). Real motion still works.
+    # After the 500 ms window, emission resumes relative to calibrated neutral.
     clock.t = 0.8
-    assert pipe.step(left_at(0.7)).wasd_held == frozenset()
-    clock.t = 0.85
-    assert pipe.step(left_at(0.9)).wasd_held == frozenset({"d"})
+    assert pipe.step(left_at(0.3)).wasd_held == frozenset({"d"})
 
 
 def test_low_confidence_hand_treated_as_absent(
-    make_extended_landmarks: Callable[..., np.ndarray],
+    make_palm_normal_landmarks: Callable[..., np.ndarray],
 ) -> None:
-    settings = Settings(tracking={"min_emit_confidence": 0.6})
+    settings = make_calibrated_settings(tracking={"min_emit_confidence": 0.6})
     emitter = NullEmitter()
     clock = _Clock()
     pipe = _pipeline(settings, emitter, clock)
-    lm = make_extended_landmarks(thumb_ext=1.5, offset=(0.5, 0.5, 0.0))
+    lm = make_palm_normal_landmarks(distances={"index": 0.20})
     # score below the floor -> dropped before reaching the gesture machine -> no jump.
     clock.t = 0.0
     pipe.step([HandResult(landmarks=lm, handedness="Right", score=0.3)])

@@ -12,22 +12,23 @@ lazily inside that function so importing this module stays light.
 
 from __future__ import annotations
 
-import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
-from minecraft_cv.gestures.extension import ExtensionStateMachine
 from minecraft_cv.gestures.inventory import InventoryModeToggle
-from minecraft_cv.gestures.pinch import KEY_DOWN, PinchStateMachine
-from minecraft_cv.gestures.safety import TrackingLossGuard
+from minecraft_cv.gestures.pinch import KEY_DOWN
+from minecraft_cv.gestures.registry import GestureStateMachine
+from minecraft_cv.gestures.safety import AnyGestureEvent, TrackingLossGuard
 from minecraft_cv.input.emitter import InputEmitter, create_emitter
-from minecraft_cv.joystick.deadzone import ANCHOR_INDEX, DeadzoneJoystick, anchor_xy
+from minecraft_cv.joystick.deadzone import ANCHOR_INDEX, anchor_xy
 from minecraft_cv.joystick.one_euro import OneEuroFilter
+from minecraft_cv.joystick.palm_normal import PalmNormalJoystick, palm_normal_xy
 from minecraft_cv.joystick.sprint_velocity import ENGAGE, RELEASE, SprintVelocityTrigger
+from minecraft_cv.joystick.wrist_rotation import WristRotationJoystick, palm_xz
 from minecraft_cv.recovery import HandRecovery, RecoveryDecision
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
 
@@ -36,11 +37,19 @@ if TYPE_CHECKING:
     from minecraft_cv.config import Settings
 
 
+class JoystickLike(Protocol):
+    """Shared surface for palm-normal and legacy wrist-rotation joysticks."""
+
+    def reset_neutral(self) -> None: ...
+    def update(self, signal: np.ndarray) -> np.ndarray: ...
+    def zero(self) -> np.ndarray: ...
+
+
 @dataclass
 class StepResult:
     """Outcome of one :meth:`Pipeline.step` (for tests / overlay / introspection)."""
 
-    events: list = field(default_factory=list)
+    events: Sequence[AnyGestureEvent] = field(default_factory=list)
     left_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
     right_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
     wasd_held: frozenset[str] = field(default_factory=frozenset)
@@ -54,9 +63,10 @@ class Pipeline:
         self,
         emitter: InputEmitter,
         guard: TrackingLossGuard,
-        left_joystick: DeadzoneJoystick,
-        right_joystick: DeadzoneJoystick,
+        left_joystick: JoystickLike,
+        right_joystick: JoystickLike,
         bindings: dict[str, str],
+        joystick_signal: Callable[[np.ndarray], np.ndarray] = palm_xz,
         anchor: str = "wrist",
         recenter_grace_frames: int = 0,
         cardinal_half_width: float = 35.0,
@@ -77,15 +87,17 @@ class Pipeline:
         Args:
             emitter: OS-input emitter (``NullEmitter`` for tests/dry-runs).
             guard: Tracking-loss guard wrapping both hands' gesture state machines.
-            left_joystick: Left-hand translation joystick (-> WASD).
-            right_joystick: Right-hand look joystick (-> relative mouse move).
+            left_joystick: Left-hand joystick (-> WASD).
+            right_joystick: Right-hand joystick (-> relative mouse move).
             bindings: Map of gesture/direction name -> OS key name.
-            anchor: Landmark anchor for the joysticks (``"wrist"`` or ``"middle_mcp"``).
+            joystick_signal: Landmark signal extractor passed into both joysticks.
+            anchor: Legacy anchor selector used by velocity sprint and optional cursor mode.
             recenter_grace_frames: Consecutive missing-hand frames tolerated before a hand's
                 joystick neutral is recentered.
-            cardinal_half_width: Half-width in degrees of each pure cardinal direction zone.
+            cardinal_half_width: Legacy x/y cardinal-zone setting; wrist-rotation WASD uses
+                independent x/z axes.
             swap_handedness: If True, invert MediaPipe L/R labels in ``_split``.
-            pulse_gestures: Set of gesture names that fire as one-shot key taps.
+            pulse_gestures: Legacy one-shot gestures; the default detector map uses holds.
             scroll_repeat_rate_hz: Repeat rate for hotbar scroll while pinch is held.
             look_filter: Optional One-Euro filter smoothing the right-hand mouse-look output
                 before emission. ``None`` falls back to the joystick's EMA smoothing only.
@@ -94,7 +106,7 @@ class Pipeline:
             cursor_gain: Gain mapping the right-hand normalized anchor displacement to
                 normalized screen displacement when driving the absolute cursor (inventory).
             sprint_trigger: Optional depth-velocity Sprint trigger (Task 2). ``None`` disables
-                velocity sprint (the static extension ``sprint`` gesture is unaffected).
+                velocity sprint (the configured ``sprint`` gesture is unaffected).
             left_recovery: Per-hand tracking-loss recovery controller for the left hand
                 (Task 5). ``None`` builds a default one.
             right_recovery: As above for the right hand.
@@ -108,6 +120,7 @@ class Pipeline:
         self.left_joystick = left_joystick
         self.right_joystick = right_joystick
         self.bindings = bindings
+        self.joystick_signal = joystick_signal
         self.anchor = anchor
         self.recenter_grace_frames = recenter_grace_frames
         self.cardinal_half_width = cardinal_half_width
@@ -143,21 +156,35 @@ class Pipeline:
         Returns:
             A ready-to-run :class:`Pipeline`.
         """
-        left_sm = ExtensionStateMachine("left", settings.gestures.left_hand)
-        right_sm = PinchStateMachine("right", settings.gestures.right_hand)
+        left_sm = GestureStateMachine("left", settings.gestures.left_hand)
+        right_sm = GestureStateMachine("right", settings.gestures.right_hand)
         guard = TrackingLossGuard(left_sm, right_sm)
         j = settings.joystick
-        dz = dict(
-            dynamic=j.dynamic_deadzone,
-            calibration_frames=j.calibration_frames,
-            dynamic_margin=j.dynamic_deadzone_margin,
-        )
-        left_joy = DeadzoneJoystick(
-            j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output, j.smoothing, **dz
-        )
-        right_joy = DeadzoneJoystick(
-            j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output, j.smoothing, **dz
-        )
+        joystick_signal: Callable[[np.ndarray], np.ndarray]
+        left_joy: JoystickLike
+        right_joy: JoystickLike
+        if j.mode == "palm_normal":
+            pn = j.palm_normal
+            if pn.left_neutral is None or pn.right_neutral is None:
+                raise ValueError(
+                    "Palm-normal joystick requires calibration. Run "
+                    "`mcv calibrate --apply` to write left/right neutral normals."
+                )
+            left_joy = PalmNormalJoystick(
+                pn.left_neutral, pn.deadzone, pn.left_sensitivity, j.max_output, j.smoothing
+            )
+            right_joy = PalmNormalJoystick(
+                pn.right_neutral, pn.deadzone, pn.right_sensitivity, j.max_output, j.smoothing
+            )
+            joystick_signal = palm_normal_xy
+        else:
+            left_joy = WristRotationJoystick(
+                j.deadzone_radius, j.sensitivity, j.max_output, j.smoothing
+            )
+            right_joy = WristRotationJoystick(
+                j.deadzone_radius, j.sensitivity, j.max_output, j.smoothing
+            )
+            joystick_signal = palm_xz
         look_filter = (
             OneEuroFilter(
                 min_cutoff=j.one_euro_min_cutoff,
@@ -193,6 +220,7 @@ class Pipeline:
             left_joystick=left_joy,
             right_joystick=right_joy,
             bindings=dict(settings.bindings),
+            joystick_signal=joystick_signal,
             anchor=j.anchor,
             recenter_grace_frames=j.recenter_grace_frames,
             cardinal_half_width=j.cardinal_half_width,
@@ -246,8 +274,8 @@ class Pipeline:
             right_lm if right_dec.emit else None,
         )
         for event in events:
-            # In inventory mode, suppress new LEFT-hand gameplay actions (jump/sneak/sprint/
-            # pulses) so menu navigation can't fire them. KEY_UP still passes through so any
+            # In inventory mode, suppress new LEFT-hand gameplay actions (jump/sneak/
+            # inventory/Q/F) so menu navigation can't fire them. KEY_UP still passes through so any
             # key held when the mode was entered is released, never stuck.
             if inventory_active and event.hand == "left" and event.action == KEY_DOWN:
                 continue
@@ -413,10 +441,10 @@ class Pipeline:
         self._left_miss = 0
         if not dec.emit:
             # Stabilizing on re-entry: feed coords so the neutral re-seeds, but emit nothing.
-            self.left_joystick.update(anchor_xy(landmarks, self.anchor))
+            self.left_joystick.update(self.joystick_signal(landmarks))
             self._apply_wasd(set())
             return self.left_joystick.zero()
-        out = self.left_joystick.update(anchor_xy(landmarks, self.anchor))
+        out = self.left_joystick.update(self.joystick_signal(landmarks))
         self._update_sprint(landmarks, now)
         target = self._wasd_targets(out)
         if self._sprint_active:
@@ -439,11 +467,11 @@ class Pipeline:
         self._right_miss = 0
         if not dec.emit:
             # Stabilizing: re-seed the neutral, keep the filter clear, emit no mouse-look.
-            self.right_joystick.update(anchor_xy(landmarks, self.anchor))
+            self.right_joystick.update(self.joystick_signal(landmarks))
             if self.look_filter is not None:
                 self.look_filter.reset()
             return self.right_joystick.zero()
-        out = self.right_joystick.update(anchor_xy(landmarks, self.anchor))
+        out = self.right_joystick.update(self.joystick_signal(landmarks))
         if self.look_filter is not None:
             # Velocity-adaptive smoothing: steady at rest, snappy in motion. (Task 4.)
             out = self.look_filter.filter(out, now)
@@ -454,69 +482,20 @@ class Pipeline:
     def _wasd_targets(self, output: np.ndarray) -> set[str]:
         """Translate a joystick output vector into the set of WASD keys to hold.
 
-        Uses angular cardinal zones: each axis direction has a pure zone of
-        ``±cardinal_half_width`` degrees where only that direction's key is pressed.
-        Between zones, two adjacent keys are pressed (diagonal).
-
-        Frame of reference: normalized image coords, y increases downward. Moving the hand
-        up (``y < 0``) is forward (W); right (``x > 0``) is D.
+        Uses independent joystick axes. ``x`` controls A/D. In palm-normal mode, positive
+        ``y`` means the normal points down and maps to forward (W); negative ``y`` maps back
+        (S). The legacy wrist-rotation mode also feeds its second axis through this mapping.
         """
         x, y = float(output[0]), float(output[1])
-        if x == 0.0 and y == 0.0:
-            return set()
-
-        # Compute angle in degrees. atan2 uses standard math convention (counter-clockwise
-        # from +x axis). We convert to our compass where 0° = right (+x), 90° = down (+y).
-        angle_deg = math.degrees(math.atan2(y, x))  # range [-180, 180]
-        if angle_deg < 0:
-            angle_deg += 360.0  # range [0, 360)
-
         keys: set[str] = set()
-        hw = self.cardinal_half_width
-
-        # Cardinal zones centered at: Right=0°, Down=90°, Left=180°, Up=270°
-        # In our coordinate system (y-down is positive):
-        #   Right (+x):  0° center
-        #   Down  (+y): 90° center  -> Back (S)
-        #   Left  (-x): 180° center -> Left (A)
-        #   Up    (-y): 270° center -> Forward (W)
-
-        # Check each cardinal zone. If the angle is within ±hw of the center,
-        # that key is pressed. Zones can overlap at diagonals.
-        # Right (D): centered at 0° (also 360°)
-        if angle_deg <= hw or angle_deg >= (360.0 - hw):
+        if x > 0.0:
             keys.add(self.bindings["right"])
-        # Down/Back (S): centered at 90°
-        if (90.0 - hw) <= angle_deg <= (90.0 + hw):
-            keys.add(self.bindings["back"])
-        # Left (A): centered at 180°
-        if (180.0 - hw) <= angle_deg <= (180.0 + hw):
+        elif x < 0.0:
             keys.add(self.bindings["left"])
-        # Up/Forward (W): centered at 270°
-        if (270.0 - hw) <= angle_deg <= (270.0 + hw):
+        if y > 0.0:
             keys.add(self.bindings["forward"])
-
-        # Diagonal zones: the gaps between cardinal zones. If we're in a gap, press
-        # both adjacent keys.
-        if not keys:
-            # We're in a diagonal gap. Figure out which two cardinals are adjacent.
-            if hw < angle_deg < (90.0 - hw):
-                # Between Right and Down -> D + S
-                keys.add(self.bindings["right"])
-                keys.add(self.bindings["back"])
-            elif (90.0 + hw) < angle_deg < (180.0 - hw):
-                # Between Down and Left -> S + A
-                keys.add(self.bindings["back"])
-                keys.add(self.bindings["left"])
-            elif (180.0 + hw) < angle_deg < (270.0 - hw):
-                # Between Left and Up -> A + W
-                keys.add(self.bindings["left"])
-                keys.add(self.bindings["forward"])
-            elif (270.0 + hw) < angle_deg < (360.0 - hw):
-                # Between Up and Right -> W + D
-                keys.add(self.bindings["forward"])
-                keys.add(self.bindings["right"])
-
+        elif y < 0.0:
+            keys.add(self.bindings["back"])
         return keys
 
     def _apply_wasd(self, target: set[str]) -> None:
@@ -577,6 +556,7 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
     from minecraft_cv.capture.buffer import FrameBuffer
     from minecraft_cv.capture.source import AVFoundationSource
 
+    pipeline = Pipeline.from_settings(settings)
     if source is None:
         source = AVFoundationSource(
             index=settings.camera.index,
@@ -586,18 +566,17 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
         )
 
     tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
-    pipeline = Pipeline.from_settings(settings)
     buffer = FrameBuffer(source).start()
     res_w, res_h = settings.tracking.input_resolution
     mirror = settings.camera.mirror
     overlay = settings.debug.overlay
     overlay_every = max(1, settings.debug.overlay_every)
     window = "minecraft_cv"
-    
+
     # Pre-allocate reuse buffers for the hot loop
     small_bgr = np.empty((res_h, res_w, 3), dtype=np.uint8)
     small_rgb = np.empty((res_h, res_w, 3), dtype=np.uint8)
-    
+
     last_seq = -1
     processed = 0
     dropped = 0
@@ -629,11 +608,11 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
             # and the debug overlay all share one consistent (mirrored) frame of reference.
             if mirror:
                 frame = cv2.flip(frame, 1)
-            
+
             # Resize BEFORE color convert, and use pre-allocated buffers
             cv2.resize(frame, (res_w, res_h), dst=small_bgr)
             cv2.cvtColor(small_bgr, cv2.COLOR_BGR2RGB, dst=small_rgb)
-            
+
             results = tracker.detect(small_rgb)
             result = pipeline.step(results)
             processed += 1
@@ -650,7 +629,11 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
     finally:
         t_elapsed = time.monotonic() - t_start
         fps = processed / t_elapsed if t_elapsed > 0 else 0.0
-        print(f"Pipeline shutdown. Processed {processed} frames in {t_elapsed:.2f}s ({fps:.1f} FPS), dropped {dropped} frames.")
+        print(
+            "Pipeline shutdown. "
+            f"Processed {processed} frames in {t_elapsed:.2f}s "
+            f"({fps:.1f} FPS), dropped {dropped} frames."
+        )
         pipeline.shutdown()
         buffer.stop()
         tracker.close()

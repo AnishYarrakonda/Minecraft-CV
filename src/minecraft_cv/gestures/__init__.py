@@ -1,4 +1,4 @@
-"""Discrete gesture layer: pinch-bitmask (right hand) + extension-based (left hand).
+"""Discrete gesture layer: detector registry, pinch, curled-finger, and legacy helpers.
 
 Includes Schmitt triggers, per-hand resolvers, finger-extension detection, and fail-safe
 tracking-loss guard.
@@ -18,6 +18,10 @@ from minecraft_cv.gestures.pinch import (
     ThresholdSpec,
     normalized_distances,
 )
+from minecraft_cv.gestures.registry import (
+    GestureDetectorSpec,
+    GestureStateMachine,
+)
 from minecraft_cv.gestures.safety import TrackingLossGuard
 from minecraft_cv.gestures.schmitt import (
     KEY_DOWN,
@@ -33,7 +37,9 @@ __all__ = [
     "ExtensionThresholdSpec",
     "FingerState",
     "GestureEvent",
+    "GestureDetectorSpec",
     "GestureSpec",
+    "GestureStateMachine",
     "PinchState",
     "PinchStateMachine",
     "SchmittTrigger",

@@ -85,12 +85,15 @@ class MacInputEmitter(InputEmitter):
         """Best-effort check that this process may emit synthetic input. Prompts if missing."""
         trusted = True
         try:  # pragma: no cover - macOS-only, environment-dependent
-            from ApplicationServices import AXIsProcessTrustedWithOptions
-            import CoreFoundation
+            import ApplicationServices  # type: ignore[import-untyped]
+            import CoreFoundation  # type: ignore[import-untyped]
 
             key = CoreFoundation.CFSTR("AXTrustedCheckOptionPrompt")
             options = {key: True}
-            trusted = bool(AXIsProcessTrustedWithOptions(options))
+            if hasattr(ApplicationServices, "AXIsProcessTrustedWithOptions"):
+                trusted = bool(ApplicationServices.AXIsProcessTrustedWithOptions(options))
+            elif hasattr(ApplicationServices, "AXIsProcessTrusted"):
+                trusted = bool(ApplicationServices.AXIsProcessTrusted())
         except Exception:
             # Can't determine (framework missing); proceed rather than false-alarm.
             trusted = True
@@ -186,9 +189,11 @@ class MacInputEmitter(InputEmitter):
         self._mouse.scroll(0, clicks)
 
     def __enter__(self) -> MacInputEmitter:
+        """Return this emitter for context-manager use."""
         return self
 
     def __exit__(self, *exc: object) -> None:
+        """Release all held input on context-manager exit."""
         # Never leave a key stuck down on exit (normal or exceptional).
         try:
             self.release_all()

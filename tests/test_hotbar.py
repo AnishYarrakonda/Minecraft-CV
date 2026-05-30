@@ -15,7 +15,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from minecraft_cv.config import Settings
+from conftest import make_calibrated_settings
 from minecraft_cv.input.emitter import NullEmitter
 from minecraft_cv.pipeline import Pipeline
 from minecraft_cv.tracking.tracker import HandResult
@@ -30,42 +30,43 @@ class _Clock:
 
 
 def _pipe(emitter: NullEmitter, clock: _Clock) -> Pipeline:
-    p = Pipeline.from_settings(Settings(), emitter=emitter)
+    p = Pipeline.from_settings(make_calibrated_settings(), emitter=emitter)
     p._clock = clock  # type: ignore[assignment]
     return p
 
 
 def test_ring_pinch_scrolls_up(
-    make_landmarks: Callable[..., np.ndarray],
+    make_palm_normal_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     emitter = NullEmitter()
     pipe = _pipe(emitter, _Clock())
-    pipe.step([make_hand_result(make_landmarks({"ring": 0.20}), "Left")])
-    pipe.step([make_hand_result(make_landmarks({"ring": 0.20}), "Left")])
+    pipe.step([make_hand_result(make_palm_normal_landmarks(distances={"ring": 0.20}), "Left")])
+    pipe.step([make_hand_result(make_palm_normal_landmarks(distances={"ring": 0.20}), "Left")])
     assert ("scroll", "1") in emitter.log
 
 
 def test_pinky_pinch_scrolls_down(
-    make_landmarks: Callable[..., np.ndarray],
+    make_palm_normal_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     emitter = NullEmitter()
     pipe = _pipe(emitter, _Clock())
-    pipe.step([make_hand_result(make_landmarks({"pinky": 0.20}), "Left")])
-    pipe.step([make_hand_result(make_landmarks({"pinky": 0.20}), "Left")])
+    pipe.step([make_hand_result(make_palm_normal_landmarks(distances={"pinky": 0.20}), "Left")])
+    pipe.step([make_hand_result(make_palm_normal_landmarks(distances={"pinky": 0.20}), "Left")])
     assert ("scroll", "-1") in emitter.log
 
 
 def test_hotbar_independent_of_attack(
-    make_landmarks: Callable[..., np.ndarray],
+    make_palm_normal_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     """Index (attack) + ring (hotbar) pinch simultaneously: both fire, no conflict."""
     emitter = NullEmitter()
     pipe = _pipe(emitter, _Clock())
-    pipe.step([make_hand_result(make_landmarks({"index": 0.20, "ring": 0.20}), "Left")])
-    pipe.step([make_hand_result(make_landmarks({"index": 0.20, "ring": 0.20}), "Left")])
+    lm = make_palm_normal_landmarks(distances={"index": 0.20, "ring": 0.20})
+    pipe.step([make_hand_result(lm, "Left")])
+    pipe.step([make_hand_result(lm, "Left")])
     assert ("key_down", "mouse_left") in emitter.log  # attack engaged
     assert ("scroll", "1") in emitter.log             # hotbar next fired
     # The hotbar pinch must NOT have produced a button key_down (it is scroll-only).
@@ -73,14 +74,14 @@ def test_hotbar_independent_of_attack(
 
 
 def test_held_hotbar_pinch_repeats_at_rate(
-    make_landmarks: Callable[..., np.ndarray],
+    make_palm_normal_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     """Holding the ring pinch re-emits scroll ticks at scroll_repeat_rate_hz (default 8)."""
     emitter = NullEmitter()
     clock = _Clock()
     pipe = _pipe(emitter, clock)
-    held = make_hand_result(make_landmarks({"ring": 0.20}), "Left")
+    held = make_hand_result(make_palm_normal_landmarks(distances={"ring": 0.20}), "Left")
     clock.t = 0.0
     pipe.step([held])  # frame 1
     pipe.step([held])  # engage -> 1 tick
@@ -93,19 +94,19 @@ def test_held_hotbar_pinch_repeats_at_rate(
 
 
 def test_hotbar_release_stops_repeat(
-    make_landmarks: Callable[..., np.ndarray],
+    make_palm_normal_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     emitter = NullEmitter()
     clock = _Clock()
     pipe = _pipe(emitter, clock)
     clock.t = 0.0
-    pipe.step([make_hand_result(make_landmarks({"ring": 0.20}), "Left")])  # frame 1
-    pipe.step([make_hand_result(make_landmarks({"ring": 0.20}), "Left")])  # engage
+    pipe.step([make_hand_result(make_palm_normal_landmarks(distances={"ring": 0.20}), "Left")])
+    pipe.step([make_hand_result(make_palm_normal_landmarks(distances={"ring": 0.20}), "Left")])
     clock.t = 0.1
-    pipe.step([make_hand_result(make_landmarks({"ring": 1.0}), "Left")])  # released
+    pipe.step([make_hand_result(make_palm_normal_landmarks(distances={"ring": 1.0}), "Left")])
     before = len([e for e in emitter.log if e == ("scroll", "1")])
     clock.t = 0.5
-    pipe.step([make_hand_result(make_landmarks({"ring": 1.0}), "Left")])  # no repeat after release
+    pipe.step([make_hand_result(make_palm_normal_landmarks(distances={"ring": 1.0}), "Left")])
     after = len([e for e in emitter.log if e == ("scroll", "1")])
     assert before == after

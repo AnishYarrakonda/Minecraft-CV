@@ -10,8 +10,10 @@ import pytest
 from minecraft_cv.calibration import (
     REACH_POSES,
     compute_calibration,
+    compute_palm_normal_calibration,
     load_config_data,
     merge_calibration,
+    merge_palm_normal_calibration,
     save_config_data,
 )
 from minecraft_cv.config import Settings
@@ -28,6 +30,20 @@ def _reach(center=(0.5, 0.5), reach=0.3) -> dict[str, np.ndarray]:
         "back": np.array([[center[0], center[1] + reach]]),
         "left": np.array([[center[0] - reach, center[1]]]),
         "right": np.array([[center[0] + reach, center[1]]]),
+    }
+
+
+def _normal_samples() -> dict[str, dict[str, np.ndarray]]:
+    neutral = np.zeros((40, 2))
+    return {
+        hand: {
+            "neutral": neutral,
+            "up": np.array([[0.0, -0.3]]),
+            "down": np.array([[0.0, 0.3]]),
+            "left": np.array([[-0.2, 0.0]]),
+            "right": np.array([[0.2, 0.0]]),
+        }
+        for hand in ("left", "right")
     }
 
 
@@ -72,6 +88,24 @@ def test_empty_neutral_raises() -> None:
 
 def test_reach_poses_constant_matches_directions() -> None:
     assert set(REACH_POSES) == {"forward", "back", "left", "right"}
+
+
+def test_palm_normal_calibration_writes_neutrals_and_axis_gains() -> None:
+    result = compute_palm_normal_calibration(_normal_samples(), deadzone_floor=0.01)
+    assert result.left.neutral == pytest.approx((0.0, 0.0))
+    assert result.right.neutral == pytest.approx((0.0, 0.0))
+    assert result.left.sensitivity[0] == pytest.approx(1.0 / (0.2 - result.left.deadzone))
+    assert result.left.sensitivity[1] == pytest.approx(1.0 / (0.3 - result.left.deadzone))
+
+
+def test_palm_normal_merge_preserves_other_settings() -> None:
+    existing = {"camera": {"index": 2}, "joystick": {"smoothing": 0.6}}
+    result = compute_palm_normal_calibration(_normal_samples())
+    merged = merge_palm_normal_calibration(existing, result)
+    assert merged["joystick"]["mode"] == "palm_normal"
+    assert merged["joystick"]["palm_normal"]["left_neutral"] == [0.0, 0.0]
+    assert merged["joystick"]["smoothing"] == 0.6
+    assert merged["camera"] == {"index": 2}
 
 
 # --- persistence ------------------------------------------------------------

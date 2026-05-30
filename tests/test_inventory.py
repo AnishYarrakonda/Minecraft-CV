@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from minecraft_cv.config import Settings
+from conftest import make_calibrated_settings
 from minecraft_cv.gestures.inventory import InventoryModeToggle
 from minecraft_cv.input.emitter import NullEmitter
 from minecraft_cv.pipeline import Pipeline
@@ -108,8 +108,21 @@ def test_tracking_loss_rearms_without_toggling(
 
 
 def _inv_pipeline(emitter: NullEmitter) -> Pipeline:
-    settings = Settings(inventory={"hold_frames": 1, "cooldown_frames": 0})
+    settings = make_calibrated_settings(
+        inventory={"enabled": True, "hold_frames": 1, "cooldown_frames": 0}
+    )
     return Pipeline.from_settings(settings, emitter=emitter)
+
+
+def test_inventory_mode_disabled_by_default(
+    null_emitter: NullEmitter,
+    make_extended_landmarks: Callable[..., np.ndarray],
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    pipe = Pipeline.from_settings(make_calibrated_settings(), emitter=null_emitter)
+    left = make_hand_result(_open_palm(make_extended_landmarks), "Right")
+    right = make_hand_result(_open_palm(make_extended_landmarks), "Left")
+    assert pipe.step([left, right]).inventory_active is False
 
 
 def test_inventory_mode_drives_absolute_cursor_not_relative_look(
@@ -133,8 +146,7 @@ def test_inventory_mode_pauses_wasd_and_suppresses_left_gestures(
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     pipe = _inv_pipeline(null_emitter)
-    # Both open palms toggle inventory on this very frame; the open left palm's extended thumb
-    # (a jump trigger) must be suppressed because inventory mode is active for this frame.
+    # Both open palms toggle inventory on this frame; gameplay movement/actions stay paused.
     left = make_hand_result(_open_palm(make_extended_landmarks, offset=(0.7, 0.5, 0.0)), "Right")
     right = make_hand_result(_open_palm(make_extended_landmarks), "Left")
     result = pipe.step([left, right])

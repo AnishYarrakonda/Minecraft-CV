@@ -189,7 +189,7 @@ class DeadzoneJoystick:
         # collapses it toward zero) is what makes the output flow instead of feeling sluggish.
         travel = min((distance - self._effective_radius) * self.sensitivity, 1.0)
         magnitude = (travel**self.accel_exponent) * self.max_output
-        return direction * magnitude
+        return np.asarray(direction * magnitude, dtype=np.float64)
 
     def _smooth(self, pos: np.ndarray) -> np.ndarray:
         """EMA-smooth a raw anchor sample. The first sample seeds the filter (no start-up lag).
@@ -206,8 +206,8 @@ class DeadzoneJoystick:
         else:
             alpha = 1.0 - self.smoothing  # weight on the new sample
             filtered = alpha * pos + self.smoothing * prev
-        self._filtered = filtered
-        return filtered
+        self._filtered = np.asarray(filtered, dtype=np.float64)
+        return self._filtered
 
     def zero(self) -> np.ndarray:
         """Return a zero output vector (used when the hand is absent)."""

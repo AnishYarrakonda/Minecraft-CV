@@ -76,7 +76,9 @@ class FrameBuffer:
         self._source.release()
 
     def __enter__(self) -> FrameBuffer:
+        """Start the buffer thread when entering a context manager."""
         return self.start()
 
     def __exit__(self, *exc: object) -> None:
+        """Stop the buffer thread and release the source on context exit."""
         self.stop()

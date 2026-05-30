@@ -32,8 +32,9 @@ from typing import Any
 import numpy as np
 import yaml
 
-# The cardinal pose names the wizard collects, in prompt order.
+# The cardinal pose names the legacy anchor wizard collects, in prompt order.
 REACH_POSES: tuple[str, ...] = ("forward", "back", "left", "right")
+PALM_NORMAL_POSES: tuple[str, ...] = ("up", "down", "left", "right")
 
 
 @dataclass(frozen=True)
@@ -63,12 +64,53 @@ class CalibrationResult:
         }
 
 
+@dataclass(frozen=True)
+class PalmNormalHandCalibration:
+    """Calibrated palm-normal settings for one hand."""
+
+    neutral: tuple[float, float]
+    deadzone: float
+    sensitivity: tuple[float, float]
+    resting_jitter: float
+    x_reach: float
+    y_reach: float
+
+
+@dataclass(frozen=True)
+class PalmNormalCalibrationResult:
+    """Calibrated palm-normal settings for both hands."""
+
+    left: PalmNormalHandCalibration
+    right: PalmNormalHandCalibration
+
+    def joystick_overrides(self) -> dict[str, Any]:
+        """The ``joystick`` config subtree written by palm-normal calibration."""
+        return {
+            "mode": "palm_normal",
+            "palm_normal": {
+                "left_neutral": [round(v, 5) for v in self.left.neutral],
+                "right_neutral": [round(v, 5) for v in self.right.neutral],
+                "deadzone": round(max(self.left.deadzone, self.right.deadzone), 5),
+                "left_sensitivity": [round(v, 5) for v in self.left.sensitivity],
+                "right_sensitivity": [round(v, 5) for v in self.right.sensitivity],
+            },
+        }
+
+
 def _as_xy(samples: Sequence[Any] | np.ndarray) -> np.ndarray:
     """Coerce a sequence of ``(x, y)`` samples to ``(N, 2)`` float (empty -> ``(0, 2)``)."""
     arr = np.asarray(samples, dtype=np.float64)
     if arr.size == 0:
         return np.empty((0, 2), dtype=np.float64)
     return arr.reshape(-1, 2)
+
+
+def _axis_gain(reach: float, deadzone: float, max_sensitivity: float) -> float:
+    """Map comfortable axis reach to a linear gain that saturates at max output."""
+    travel = reach - deadzone
+    if travel <= 1e-6:
+        return max_sensitivity
+    return min(max_sensitivity, 1.0 / travel)
 
 
 def compute_calibration(
@@ -127,6 +169,79 @@ def compute_calibration(
     )
 
 
+def compute_palm_normal_hand_calibration(
+    neutral_samples: Sequence[Any] | np.ndarray,
+    reach_samples: Mapping[str, Sequence[Any] | np.ndarray],
+    *,
+    deadzone_margin: float = 1.5,
+    deadzone_floor: float = 0.01,
+    max_sensitivity: float = 50.0,
+) -> PalmNormalHandCalibration:
+    """Derive one hand's palm-normal neutral, deadzone, and per-axis sensitivity."""
+    neutral_arr = _as_xy(neutral_samples)
+    if neutral_arr.shape[0] == 0:
+        raise ValueError("Palm-normal calibration needs neutral samples for both hands.")
+
+    neutral = neutral_arr.mean(axis=0)
+    resting_delta = np.abs(neutral_arr - neutral)
+    resting_radii = resting_delta.max(axis=1)
+    jitter = float(np.percentile(resting_radii, 95)) if resting_radii.size else 0.0
+    deadzone = max(deadzone_floor, jitter * deadzone_margin)
+
+    def _reach(name: str, axis: int, sign: float) -> float:
+        arr = _as_xy(reach_samples.get(name, []))
+        if arr.shape[0] == 0:
+            return deadzone * 2.0
+        delta = (arr[:, axis] - neutral[axis]) * sign
+        return max(deadzone * 2.0, float(np.max(delta)))
+
+    right_reach = _reach("right", 0, 1.0)
+    left_reach = _reach("left", 0, -1.0)
+    down_reach = _reach("down", 1, 1.0)
+    up_reach = _reach("up", 1, -1.0)
+    x_reach = float(np.mean([left_reach, right_reach]))
+    y_reach = float(np.mean([up_reach, down_reach]))
+
+    return PalmNormalHandCalibration(
+        neutral=(float(neutral[0]), float(neutral[1])),
+        deadzone=float(deadzone),
+        sensitivity=(
+            _axis_gain(x_reach, deadzone, max_sensitivity),
+            _axis_gain(y_reach, deadzone, max_sensitivity),
+        ),
+        resting_jitter=jitter,
+        x_reach=x_reach,
+        y_reach=y_reach,
+    )
+
+
+def compute_palm_normal_calibration(
+    samples: Mapping[str, Mapping[str, Sequence[Any] | np.ndarray]],
+    *,
+    deadzone_margin: float = 1.5,
+    deadzone_floor: float = 0.01,
+    max_sensitivity: float = 50.0,
+) -> PalmNormalCalibrationResult:
+    """Derive palm-normal settings for left and right hands from guided pose samples."""
+    left_samples = samples.get("left", {})
+    right_samples = samples.get("right", {})
+    left = compute_palm_normal_hand_calibration(
+        left_samples.get("neutral", []),
+        {pose: left_samples.get(pose, []) for pose in PALM_NORMAL_POSES},
+        deadzone_margin=deadzone_margin,
+        deadzone_floor=deadzone_floor,
+        max_sensitivity=max_sensitivity,
+    )
+    right = compute_palm_normal_hand_calibration(
+        right_samples.get("neutral", []),
+        {pose: right_samples.get(pose, []) for pose in PALM_NORMAL_POSES},
+        deadzone_margin=deadzone_margin,
+        deadzone_floor=deadzone_floor,
+        max_sensitivity=max_sensitivity,
+    )
+    return PalmNormalCalibrationResult(left=left, right=right)
+
+
 def merge_calibration(existing: dict[str, Any], result: CalibrationResult) -> dict[str, Any]:
     """Return a deep copy of ``existing`` config data with the calibrated joystick keys merged.
 
@@ -136,6 +251,21 @@ def merge_calibration(existing: dict[str, Any], result: CalibrationResult) -> di
     merged = copy.deepcopy(existing)
     joystick = dict(merged.get("joystick") or {})
     joystick.update(result.joystick_overrides())
+    merged["joystick"] = joystick
+    return merged
+
+
+def merge_palm_normal_calibration(
+    existing: dict[str, Any], result: PalmNormalCalibrationResult
+) -> dict[str, Any]:
+    """Return config data with calibrated palm-normal joystick values merged in."""
+    merged = copy.deepcopy(existing)
+    joystick = dict(merged.get("joystick") or {})
+    overrides = result.joystick_overrides()
+    palm_normal = dict(joystick.get("palm_normal") or {})
+    palm_normal.update(overrides["palm_normal"])
+    joystick.update({k: v for k, v in overrides.items() if k != "palm_normal"})
+    joystick["palm_normal"] = palm_normal
     merged["joystick"] = joystick
     return merged
 
@@ -162,9 +292,15 @@ def save_config_data(path: str | Path, data: dict[str, Any]) -> None:
 
 __all__ = [
     "REACH_POSES",
+    "PALM_NORMAL_POSES",
     "CalibrationResult",
+    "PalmNormalCalibrationResult",
+    "PalmNormalHandCalibration",
     "compute_calibration",
+    "compute_palm_normal_calibration",
+    "compute_palm_normal_hand_calibration",
     "load_config_data",
     "merge_calibration",
+    "merge_palm_normal_calibration",
     "save_config_data",
 ]

@@ -76,7 +76,7 @@ def test_debounce_spike() -> None:
     assert t.update(0.29) is None
     assert t.update(0.31) is None
     assert t.state is PinchState.RELEASED
-    
+
     # 2 frame spike
     assert t.update(0.29) is None
     assert t.update(0.29) == KEY_DOWN

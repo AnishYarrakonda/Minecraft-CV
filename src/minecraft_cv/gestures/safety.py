@@ -11,29 +11,25 @@ pipeline's responsibility (it simply emits a zero vector for the absent hand).
 
 from __future__ import annotations
 
-from typing import Protocol, Union
+from collections.abc import Sequence
+from typing import Protocol
 
 import numpy as np
 
-from minecraft_cv.gestures.extension import (
-    ExtensionStateMachine,
-    GestureEvent,
-)
-from minecraft_cv.gestures.pinch import (
-    GestureEvent as PinchGestureEvent,
-    PinchStateMachine,
-)
+from minecraft_cv.gestures.extension import GestureEvent
+from minecraft_cv.gestures.pinch import GestureEvent as PinchGestureEvent
+from minecraft_cv.gestures.registry import GestureEvent as RegistryGestureEvent
 
 # Unified event type: both machines produce compatible GestureEvent objects with the
 # same .gesture / .action / .hand attributes.
-AnyGestureEvent = Union[GestureEvent, PinchGestureEvent]
+AnyGestureEvent = GestureEvent | PinchGestureEvent | RegistryGestureEvent
 
 
 class _GestureMachine(Protocol):
     """Protocol for any gesture state machine (pinch or extension)."""
 
-    def update(self, landmarks: np.ndarray) -> list: ...
-    def reset(self) -> list: ...
+    def update(self, landmarks: np.ndarray) -> Sequence[AnyGestureEvent]: ...
+    def reset(self) -> Sequence[AnyGestureEvent]: ...
 
 
 class TrackingLossGuard:
@@ -46,14 +42,14 @@ class TrackingLossGuard:
     ``reset`` is idempotent, so a hand that stays out of frame emits a ``KEY_UP`` only on the
     first absent frame and nothing thereafter.
 
-    Supports both :class:`PinchStateMachine` (right hand) and
-    :class:`ExtensionStateMachine` (left hand).
+    Supports any per-hand machine that exposes ``update`` and ``reset`` methods returning
+    compatible gesture events.
     """
 
     def __init__(
         self,
-        left: ExtensionStateMachine | PinchStateMachine,
-        right: PinchStateMachine,
+        left: _GestureMachine,
+        right: _GestureMachine,
     ) -> None:
         """Wrap the left- and right-hand gesture state machines."""
         self._left = left
@@ -85,8 +81,8 @@ class TrackingLossGuard:
         machine: _GestureMachine, landmarks: np.ndarray | None
     ) -> list[AnyGestureEvent]:
         if landmarks is None:
-            return machine.reset()
-        return machine.update(landmarks)
+            return list(machine.reset())
+        return list(machine.update(landmarks))
 
     def release_all(self) -> list[AnyGestureEvent]:
         """Release every held gesture on both hands (shutdown / crash safety).
@@ -95,7 +91,7 @@ class TrackingLossGuard:
             A ``KEY_UP`` event per gesture that had been holding. The pipeline emits these
             and then also calls ``emitter.release_all()`` as the OS-level backstop.
         """
-        return self._left.reset() + self._right.reset()
+        return [*self._left.reset(), *self._right.reset()]
 
     def reset_left(self) -> list[AnyGestureEvent]:
         """Release every held LEFT-hand gesture (e.g. on entering inventory mode).
@@ -104,4 +100,4 @@ class TrackingLossGuard:
             One ``KEY_UP`` event per left-hand gesture that had been holding; empty if none.
             Idempotent.
         """
-        return self._left.reset()
+        return list(self._left.reset())

@@ -25,58 +25,91 @@ tracking:
 
 gestures:
   left_hand:
-    # Extension-based gestures: closed fist is default; extending specific fingers triggers
-    # gestures. Each threshold is on a continuous extension ratio fed into a Schmitt trigger.
-    jump:                   # thumb extended outward from fist
-      type: thumb_out
-      t_engage: 1.2         # normalized thumb-tip-to-index-MCP / hand-scale
-      t_release: 0.9
-    sneak:                  # index finger extended from fist (others curled)
-      type: index_only
-      t_engage: 1.15        # wrist-to-tip / wrist-to-pip ratio
-      t_release: 1.05
-    sprint:                 # middle finger extended from fist (others curled)
-      type: middle_only
-      t_engage: 1.15
-      t_release: 1.05
-    inventory:              # index + middle extended ("peace sign")
-      type: index_middle
-      t_engage: 1.15
-      t_release: 1.05
-      pulse: true           # one-shot key tap, not a hold
-    throw_item:             # ring finger extended from fist
-      type: ring_only
-      t_engage: 1.15
-      t_release: 1.05
-      pulse: true
-    switch_offhand:         # pinky finger extended from fist
-      type: pinky_only
-      t_engage: 1.15
-      t_release: 1.05
-      pulse: true
-  right_hand:
-    # Pinch-based gestures: thumb-to-fingertip distances.
-    attack:                 # thumb -> index
+    # Pinches are holds. Ring+pinky curl holds Shift for sneak and suppresses ring/pinky
+    # pinches on the left hand while active.
+    jump:                   # thumb -> index
+      detector: pinch
       finger: index
+      mode: hold
       t_engage: 0.30
       t_release: 0.45
-    use:                    # thumb -> middle
+    inventory:              # thumb -> middle
+      detector: pinch
       finger: middle
+      mode: hold
       t_engage: 0.30
       t_release: 0.45
-    hotbar_next:            # thumb -> ring (scroll up)
+    throw_item:             # thumb -> ring
+      detector: pinch
       finger: ring
+      mode: hold
       t_engage: 0.30
       t_release: 0.45
-    hotbar_prev:            # thumb -> pinky (scroll down)
+    switch_offhand:         # thumb -> pinky
+      detector: pinch
       finger: pinky
+      mode: hold
       t_engage: 0.30
       t_release: 0.45
+    sneak:                  # ring + pinky curled -> hold Shift
+      detector: curl_combo
+      finger: pinky
+      mode: hold
+      t_engage: 0.95
+      t_release: 1.05
+      curl_fingers: [ring, pinky]
+      suppresses: [throw_item, switch_offhand]
+  right_hand:
+    # Pinch-based gestures plus ring+pinky curl for Sprint. Sprint suppresses hotbar pinches.
+    attack:                 # thumb -> index
+      detector: pinch
+      finger: index
+      mode: hold
+      t_engage: 0.30
+      t_release: 0.45
+      conflict_group: primary_click
+    use:                    # thumb -> middle
+      detector: pinch
+      finger: middle
+      mode: hold
+      t_engage: 0.30
+      t_release: 0.45
+      conflict_group: primary_click
+    hotbar_next:            # thumb -> ring (scroll up)
+      detector: pinch
+      finger: ring
+      mode: hold
+      t_engage: 0.30
+      t_release: 0.45
+      conflict_group: hotbar_scroll
+    hotbar_prev:            # thumb -> pinky (scroll down)
+      detector: pinch
+      finger: pinky
+      mode: hold
+      t_engage: 0.30
+      t_release: 0.45
+      conflict_group: hotbar_scroll
+    sprint:                 # ring + pinky curled -> hold Ctrl
+      detector: curl_combo
+      finger: ring
+      mode: hold
+      t_engage: 0.95
+      t_release: 1.05
+      curl_fingers: [ring, pinky]
+      suppresses: [hotbar_next, hotbar_prev]
 
 joystick:
-  deadzone_radius: 0.05     # normalized units; sphere radius (not a box)
-  sensitivity: 2.0          # travel-to-saturation gain: full output at (1/sensitivity) travel
-  accel_exponent: 2.0       # ease-in curve over [0,1] (gentle near center, fast at the edge)
+  mode: palm_normal         # palm_normal | wrist_rotation
+  palm_normal:
+    # Run `mcv calibrate --apply` before `mcv run`; runtime refuses null neutrals.
+    left_neutral: null      # calibrated palm-normal [x, y] for the physical left hand
+    right_neutral: null     # calibrated palm-normal [x, y] for the physical right hand
+    deadzone: 0.05          # per-axis neutral zone in palm-normal units
+    left_sensitivity: [2.0, 2.0]   # calibrated x/y gains for WASD
+    right_sensitivity: [2.0, 2.0]  # calibrated x/y gains for mouse look
+  deadzone_radius: 0.05     # legacy wrist_rotation per-axis neutral zone
+  sensitivity: 2.0          # legacy wrist_rotation linear gain
+  accel_exponent: 2.0       # legacy x/y joystick setting
   anchor: wrist             # wrist (landmark 0) | middle_mcp (landmark 9)
   max_output: 1.0           # output magnitude at saturation
   smoothing: 0.6            # EMA on anchor position (0=none ->1=heavy); kills jitter/chatter
@@ -92,11 +125,9 @@ joystick:
   one_euro_beta: 0.007          # higher = less lag on fast looks, more jitter
   one_euro_d_cutoff: 1.0        # Hz; cutoff for the internal speed estimate
 
-# Inventory mode (V2): a held two-hand open-palm pose toggles a modal cursor state where WASD
-# and relative look are paused and the right hand drives the OS cursor in absolute screen
-# coords (right-hand pinches act as left/right click; a held pinch is a click-and-drag).
+# Inventory mode (legacy V2): disabled by default because open palm is now the neutral pose.
 inventory:
-  enabled: true
+  enabled: false
   open_threshold: 1.1           # finger extension ratio above which a finger counts as open
   thumb_open_threshold: 0.9     # thumb lateral-extension ratio above which the thumb is open
   hold_frames: 8                # consecutive both-open frames required before toggling
@@ -105,8 +136,8 @@ inventory:
 
 # Sprint-via-velocity (Task 2): a quick forward push of the left hand toward the camera engages
 # Sprint (Ctrl held alongside W); it holds while the hand stays forward and releases on retreat.
-# Disabled by default because MediaPipe z is the least reliable landmark axis. When enabling,
-# consider removing the static `sprint` (middle_only) extension gesture so both don't drive Ctrl.
+# Disabled by default because MediaPipe z is the least reliable landmark axis. Prefer the
+# right-hand ring+pinky curl sprint gesture unless you are experimenting with velocity sprint.
 sprint:
   enabled: false            # off by default; the middle-finger extension sprint still works
   v_sprint: 1.0             # forward-velocity threshold (normalized z units / second)

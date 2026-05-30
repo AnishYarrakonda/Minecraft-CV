@@ -52,6 +52,7 @@ class SchmittTrigger:
     state: PinchState = PinchState.RELEASED
 
     def __post_init__(self) -> None:
+        """Validate hysteresis thresholds and initialize debounce counters."""
         if not self.t_release > self.t_engage:
             raise ValueError(
                 f"t_release ({self.t_release}) must be strictly greater than "

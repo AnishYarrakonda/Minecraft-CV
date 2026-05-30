@@ -95,7 +95,7 @@ def normalized_distances(landmarks: np.ndarray) -> dict[str, float]:
     thumb = landmarks[THUMB_TIP]
     tips = landmarks[_TIP_INDICES]  # (4, 3)
     raw = np.linalg.norm(tips - thumb, axis=1) / scale  # (4,) — one vectorized call
-    return {name: float(d) for name, d in zip(_FINGER_ORDER, raw)}
+    return {name: float(d) for name, d in zip(_FINGER_ORDER, raw, strict=True)}
 
 
 class PinchStateMachine:

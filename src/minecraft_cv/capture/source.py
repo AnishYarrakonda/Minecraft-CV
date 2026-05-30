@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -122,13 +122,22 @@ class AVFoundationSource(FrameSource):
         max_attempts = 100
         for i in range(max_attempts):
             ok, frame = self._cap.read()
-            if ok and frame is not None:
-                if float(np.asarray(frame).std()) >= _BLANK_STD_THRESHOLD:
-                    if i >= 10:
-                        print(" [done]", file=sys.stderr)
-                    return
+            if (
+                ok
+                and frame is not None
+                and float(np.asarray(frame).std()) >= _BLANK_STD_THRESHOLD
+            ):
+                if i >= 10:
+                    print(" [done]", file=sys.stderr)
+                return
             if i == 10:
-                print(f"[mcv-run] Waiting for camera {self._index} to warm up or for macOS permission prompt...", end="", flush=True, file=sys.stderr)
+                print(
+                    f"[mcv-run] Waiting for camera {self._index} to warm up or for "
+                    "macOS permission prompt...",
+                    end="",
+                    flush=True,
+                    file=sys.stderr,
+                )
             time.sleep(0.05)  # give the sensor/driver a brief moment to warm up
 
         if max_attempts > 10:
@@ -141,12 +150,14 @@ class AVFoundationSource(FrameSource):
         )
 
     def read(self) -> np.ndarray | None:
+        """Read one BGR frame from the live camera, or ``None`` on read failure."""
         ok, frame = self._cap.read()
         if not ok or frame is None:
             return None
-        return frame
+        return cast(np.ndarray, frame)
 
     def release(self) -> None:
+        """Release the underlying ``cv2.VideoCapture`` object."""
         cap = getattr(self, "_cap", None)
         if cap is not None:
             cap.release()
@@ -154,6 +165,7 @@ class AVFoundationSource(FrameSource):
 
     @property
     def fps(self) -> float:
+        """Configured camera frame rate in frames per second."""
         return self._fps
 
 
@@ -191,6 +203,7 @@ class ClipSource(FrameSource):
             self._fps = float(cap.get(self._cv2.CAP_PROP_FPS)) or 30.0
 
     def read(self) -> np.ndarray | None:
+        """Read the next BGR frame from the clip/image, or ``None`` at EOF."""
         if self._is_image:
             img, self._image = self._image, None  # yield once, then exhausted
             return img
@@ -200,10 +213,12 @@ class ClipSource(FrameSource):
         return frame if ok else None
 
     def release(self) -> None:
+        """Release the underlying clip reader."""
         if self._cap is not None:
             self._cap.release()
             self._cap = None
 
     @property
     def fps(self) -> float:
+        """Clip frame rate in frames per second."""
         return self._fps

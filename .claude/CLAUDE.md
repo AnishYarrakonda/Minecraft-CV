@@ -11,16 +11,16 @@ gestures to game input, and emits OS-level events via pynput / Quartz CGEvent.
 source .venv/bin/activate
 
 # Dry run with camera and debug overlay
-.venv/bin/python -m minecraft_cv.cli --config config.yaml --no-input --debug-overlay
+.venv/bin/python -m minecraft_cv.cli run --no-input --debug-overlay
 
 # Live mode (emits real OS input)
-.venv/bin/python -m minecraft_cv.cli --config config.yaml --input --debug-overlay
+.venv/bin/python -m minecraft_cv.cli run --input --debug-overlay
 
 # Calibrate spatial joystick
-.venv/bin/python -m minecraft_cv.calibration --config config.yaml --apply
+.venv/bin/python -m minecraft_cv.cli calibrate --apply
 
 # Offline clip analysis
-.venv/bin/python -m minecraft_cv.cli --config config.yaml --clip data/clips/foo.mp4 --debug-overlay
+.venv/bin/python -m minecraft_cv.cli analyze data/clips/foo.mp4
 
 # Fast regression test
 .venv/bin/python -m pytest -k schmitt -x

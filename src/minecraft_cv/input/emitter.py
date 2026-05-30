@@ -30,6 +30,7 @@ class InputEmitter(ABC):
     """
 
     def __init__(self) -> None:
+        """Initialize held-key reference counts."""
         self._held_keys: dict[str, int] = {}
 
     # --- public API ---------------------------------------------------------
@@ -119,6 +120,7 @@ class NullEmitter(InputEmitter):
     """
 
     def __init__(self) -> None:
+        """Create an empty in-memory event log."""
         super().__init__()
         self.log: list[tuple[str, ...]] = []
 
@@ -138,6 +140,7 @@ class NullEmitter(InputEmitter):
         self.log.append(("scroll", str(clicks)))
 
     def key_tap(self, key: str) -> None:
+        """Record and emit a momentary key tap."""
         self.log.append(("key_tap", key))
         # Still emit the actual down/up for backends that need it
         self._emit_key_down(key)

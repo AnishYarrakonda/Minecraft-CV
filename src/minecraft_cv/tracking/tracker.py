@@ -51,6 +51,7 @@ class HandTracker(ABC):
 
     def close(self) -> None:
         """Release backend resources. Default no-op; override if needed."""
+        return None
 
     @staticmethod
     def create(backend: str = "mediapipe", device: str = "auto") -> HandTracker:

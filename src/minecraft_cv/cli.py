@@ -36,7 +36,7 @@ def _load_settings(path: str, overrides: dict[str, Any] | None = None) -> Settin
 
 # --- Unified Entrypoint -------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
-    """Unified entrypoint: mcv <command> [args...]"""
+    """Unified entrypoint: mcv <command> [args...]."""
     if argv is None:
         argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
@@ -73,7 +73,9 @@ def main(argv: list[str] | None = None) -> int:
 # --- mcv doctor ---------------------------------------------------------------
 def main_doctor(argv: list[str] | None = None) -> int:
     """Check AVFoundation permission and print config."""
-    p = argparse.ArgumentParser(prog="mcv doctor", description="Check system permissions and config.")
+    p = argparse.ArgumentParser(
+        prog="mcv doctor", description="Check system permissions and config."
+    )
     _add_config_arg(p)
     args = p.parse_args(argv)
 
@@ -106,18 +108,24 @@ def main_doctor(argv: list[str] | None = None) -> int:
 def main_gestures(argv: list[str] | None = None) -> int:
     """Print the gesture reference card."""
     print("=== minecraft_cv Gesture Reference ===")
-    print("\n[Left Hand - Extension Gestures]")
-    print("  Thumb Out    -> Jump (Space)")
-    print("  Index Only   -> Sneak (Shift)")
-    print("  Middle Only  -> Sprint (Ctrl)")
-    print("  Peace Sign   -> Inventory (E) [Pulse]")
-    print("\n[Right Hand - Pinch Gestures]")
+    print("\n[Calibrated Palm-Normal Thumbsticks]")
+    print("  Left palm normal x/y  -> WASD movement")
+    print("    right/left -> D/A, down/up -> W/S")
+    print("  Right palm normal x/y -> Mouse look")
+    print("  Run `mcv calibrate --apply` before `mcv run`.")
+    print("\n[Left Hand - Actions]")
+    print("  Index Pinch  -> Jump (Space)")
+    print("  Middle Pinch -> Inventory (E)")
+    print("  Ring Pinch   -> Throw Item (Q)")
+    print("  Pinky Pinch  -> Swap Offhand (F)")
+    print("  Ring+Pinky Curl -> Sneak (Shift)")
+    print("\n[Right Hand - Holds]")
     print("  Index Pinch  -> Attack/Mine (Left Click)")
     print("  Middle Pinch -> Use/Place (Right Click)")
     print("  Ring Pinch   -> Hotbar Scroll Up")
     print("  Pinky Pinch  -> Hotbar Scroll Down")
-    print("\n[Both Hands - Inventory Mode]")
-    print("  Open both hands fully to toggle absolute-cursor inventory mode.")
+    print("  Ring+Pinky Curl -> Sprint (Ctrl)")
+    print("\nOpen palms are neutral; legacy inventory mode is disabled by default.")
     return 0
 
 
@@ -159,7 +167,7 @@ def main_run(argv: list[str] | None = None) -> int:
         run_pipeline(settings, source=source)
     except KeyboardInterrupt:
         print("\n[mcv-run] interrupted; releasing all input.", file=sys.stderr)
-    except (PermissionError, RuntimeError, FileNotFoundError) as exc:
+    except (PermissionError, RuntimeError, FileNotFoundError, ValueError) as exc:
         print(f"[mcv-run] error: {exc}", file=sys.stderr)
         return 1
     return 0
@@ -167,11 +175,11 @@ def main_run(argv: list[str] | None = None) -> int:
 
 # --- mcv-calibrate ------------------------------------------------------------
 def main_calibrate(argv: list[str] | None = None) -> int:
-    """Guided spatial-joystick calibration wizard (Task 3).
+    """Guided spatial-joystick calibration wizard.
 
-    Walks the user through a neutral pose plus a full push in each cardinal direction, derives
-    ``joystick.deadzone_radius`` + ``joystick.sensitivity`` from the samples, and (with
-    ``--apply``) writes them back to ``config.yaml`` without disturbing any other setting.
+    In palm-normal mode, walks the user through neutral plus comfortable palm-normal tilts
+    and writes the required calibrated neutral/gain values. ``--mode anchor`` keeps the legacy
+    anchor-position calibration.
 
     ``--pinch`` keeps the legacy live thumb-to-fingertip distance readout for Schmitt tuning.
     """
@@ -184,6 +192,8 @@ def main_calibrate(argv: list[str] | None = None) -> int:
                    help="MediaPipe handedness label to sample (default: Right)")
     p.add_argument("--anchor", choices=["wrist", "middle_mcp"], default=None,
                    help="anchor landmark (default: from config)")
+    p.add_argument("--mode", choices=["palm-normal", "anchor"], default=None,
+                   help="calibration mode (default: from joystick.mode)")
     p.add_argument("--frames-per-step", type=int, default=60,
                    help="samples to collect per pose (default: 60)")
     p.add_argument("--apply", action="store_true", help="write the result back to config.yaml")
@@ -194,7 +204,123 @@ def main_calibrate(argv: list[str] | None = None) -> int:
 
     if args.pinch:
         return _calibrate_pinch(args, settings)
+    mode = args.mode or ("palm-normal" if settings.joystick.mode == "palm_normal" else "anchor")
+    if mode == "palm-normal":
+        return _calibrate_palm_normals(args, settings)
     return _calibrate_joysticks(args, settings)
+
+
+def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int:
+    """Run the guided palm-normal wizard and optionally persist calibrated settings."""
+    import cv2
+
+    from minecraft_cv.calibration import (
+        PALM_NORMAL_POSES,
+        compute_palm_normal_calibration,
+        load_config_data,
+        merge_palm_normal_calibration,
+        save_config_data,
+    )
+    from minecraft_cv.capture.source import AVFoundationSource, ClipSource
+    from minecraft_cv.tracking.tracker import HandTracker
+
+    live = not args.clip
+    try:
+        source = (
+            ClipSource(args.clip)
+            if args.clip
+            else AVFoundationSource(
+                settings.camera.index, settings.camera.width,
+                settings.camera.height, settings.camera.fps,
+            )
+        )
+        tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
+    except (FileNotFoundError, RuntimeError, PermissionError) as exc:
+        print(f"[mcv-calibrate] error: {exc}", file=sys.stderr)
+        return 1
+
+    steps: list[tuple[str, str]] = [
+        ("neutral", "Hold BOTH hands in your comfortable resting pose."),
+        *[
+            (pose, f"Tilt BOTH palm normals {pose.upper()} to a comfortable full reach.")
+            for pose in PALM_NORMAL_POSES
+        ],
+    ]
+    collected: dict[str, dict[str, list[np.ndarray]]] = {
+        "left": {},
+        "right": {},
+    }
+    print("=== mcv-calibrate: palm-normal joystick wizard ===")
+    print(f"  hands=both  frames/step={args.frames_per_step}")
+    try:
+        for name, instruction in steps:
+            print(f"\n[{name}] {instruction}")
+            if live:
+                for c in (3, 2, 1):
+                    print(f"  capturing in {c}...", end="\r", flush=True)
+                    time.sleep(1.0)
+            samples = _collect_palm_normal_samples(
+                source,
+                tracker,
+                args.frames_per_step,
+                settings.camera.mirror,
+                settings.tracking.swap_handedness,
+                cv2,
+            )
+            for hand in ("left", "right"):
+                collected[hand][name] = samples[hand]
+            print(
+                f"  captured left={len(samples['left'])} right={len(samples['right'])} "
+                f"samples for '{name}'.        "
+            )
+    except KeyboardInterrupt:
+        print("\n[mcv-calibrate] aborted; nothing written.")
+        return 1
+    finally:
+        source.release()
+        tracker.close()
+
+    try:
+        result = compute_palm_normal_calibration(
+            collected,
+            deadzone_margin=settings.joystick.dynamic_deadzone_margin,
+        )
+    except ValueError as exc:
+        print(f"[mcv-calibrate] error: {exc} (were both hands visible?)", file=sys.stderr)
+        return 1
+
+    overrides = result.joystick_overrides()["palm_normal"]
+    print("\n=== Result ===")
+    print(f"  left neutral        = {overrides['left_neutral']}")
+    print(f"  right neutral       = {overrides['right_neutral']}")
+    print(f"  deadzone            = {overrides['deadzone']}")
+    print(f"  left sensitivity    = {overrides['left_sensitivity']}")
+    print(f"  right sensitivity   = {overrides['right_sensitivity']}")
+
+    if not args.apply:
+        print(
+            "\n[mcv-calibrate] preview only. Re-run with --apply to write to "
+            f"{args.config}."
+        )
+        return 0
+
+    config_path = args.config
+    if not Path(config_path).is_file():
+        print(
+            f"[mcv-calibrate] error: cannot apply; config '{config_path}' does not exist.",
+            file=sys.stderr,
+        )
+        return 1
+    merged = merge_palm_normal_calibration(load_config_data(config_path), result)
+    try:
+        Settings(**merged)
+    except Exception as exc:  # noqa: BLE001 - surface any validation failure to the user
+        print(f"[mcv-calibrate] error: computed config failed validation: {exc}",
+              file=sys.stderr)
+        return 1
+    save_config_data(config_path, merged)
+    print(f"[mcv-calibrate] wrote palm-normal calibration to {config_path}.")
+    return 0
 
 
 def _calibrate_joysticks(args: argparse.Namespace, settings: Settings) -> int:
@@ -314,6 +440,35 @@ def _collect_anchor_samples(
             if h.handedness == hand:
                 out.append(anchor_xy(h.landmarks, anchor))
                 break
+    return out
+
+
+def _collect_palm_normal_samples(
+    source: Any,
+    tracker: Any,
+    n_frames: int,
+    mirror: bool,
+    swap_handedness: bool,
+    cv2: Any,
+) -> dict[str, list[np.ndarray]]:
+    """Collect palm-normal ``(x, y)`` samples for both logical hands."""
+    from minecraft_cv.joystick.palm_normal import palm_normal_xy
+
+    out: dict[str, list[np.ndarray]] = {"left": [], "right": []}
+    while len(out["left"]) < n_frames or len(out["right"]) < n_frames:
+        frame = source.read()
+        if frame is None:
+            break
+        if mirror:
+            frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        for h in tracker.detect(rgb):
+            label = h.handedness
+            if swap_handedness:
+                label = "Right" if label == "Left" else "Left"
+            key = label.lower()
+            if key in out and len(out[key]) < n_frames:
+                out[key].append(palm_normal_xy(h.landmarks))
     return out
 
 

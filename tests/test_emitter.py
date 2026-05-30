@@ -30,11 +30,11 @@ def test_key_down_is_deduplicated_and_refcounted() -> None:
     em.key_down("w")  # count is now 2 -> no second press
     assert em.log == [("key_down", "w")]
     assert em.held_keys == frozenset({"w"})
-    
+
     em.key_up("w")  # count goes to 1 -> no release yet
     assert em.log == [("key_down", "w")]
     assert em.held_keys == frozenset({"w"})
-    
+
     em.key_up("w")  # count goes to 0 -> released
     assert em.log == [("key_down", "w"), ("key_up", "w")]
     assert em.held_keys == frozenset()
