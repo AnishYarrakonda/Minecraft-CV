@@ -59,10 +59,65 @@ def _build_landmarks(
     return lm + np.asarray(offset, dtype=np.float32)
 
 
+_PIP_INDICES = {"index": 6, "middle": 10, "ring": 14, "pinky": 18}
+_TIP_INDICES_EXT = {"index": 8, "middle": 12, "ring": 16, "pinky": 20}
+_MCP_INDICES = {"index": 5, "middle": 9, "ring": 13, "pinky": 17}
+
+def _build_extended_landmarks(
+    extensions: dict[str, float] | None = None,
+    thumb_ext: float = 0.5,
+    scale: float = 0.2,
+    offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> np.ndarray:
+    """Build landmarks with controllable finger extension ratios."""
+    lm = np.zeros((21, 3), dtype=np.float32)
+    wrist = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+    lm[0] = wrist  # WRIST
+    
+    full_ext: dict[str, float] = {"index": 0.8, "middle": 0.8, "ring": 0.8, "pinky": 0.8}
+    if extensions:
+        full_ext.update(extensions)
+    
+    # Different directions for each finger to avoid overlap
+    _directions = {
+        "index": np.array([0.3, 0.95, 0.0], dtype=np.float32),
+        "middle": np.array([0.0, 1.0, 0.0], dtype=np.float32),
+        "ring": np.array([-0.3, 0.95, 0.0], dtype=np.float32),
+        "pinky": np.array([-0.5, 0.87, 0.0], dtype=np.float32),
+    }
+    
+    pip_dist = scale * 0.6  # PIP is 60% of hand scale from wrist
+    
+    for finger, ratio in full_ext.items():
+        direction = _directions[finger]
+        direction = direction / np.linalg.norm(direction)  # normalize
+        
+        pip_pos = wrist + direction * pip_dist
+        tip_pos = wrist + direction * (pip_dist * ratio)
+        
+        lm[_PIP_INDICES[finger]] = pip_pos
+        lm[_TIP_INDICES_EXT[finger]] = tip_pos
+        lm[_MCP_INDICES[finger]] = wrist + direction * (pip_dist * 0.5)  # MCP halfway
+        
+    # Scale is redefined based on MIDDLE_MCP distance
+    hand_scale = float(np.linalg.norm(lm[9] - lm[0]))
+    
+    # Place thumb_tip such that dist(thumb_tip, index_mcp) = thumb_ext * hand_scale
+    lm[4] = lm[5] + np.array([-thumb_ext * hand_scale, 0.0, 0.0], dtype=np.float32)
+    
+    return lm + np.asarray(offset, dtype=np.float32)
+
+
 @pytest.fixture
 def make_landmarks() -> Callable[..., np.ndarray]:
     """Return a builder: ``make_landmarks({"index": 0.2}, scale=0.2) -> (21, 3) array``."""
     return _build_landmarks
+
+
+@pytest.fixture
+def make_extended_landmarks() -> Callable[..., np.ndarray]:
+    """Return a builder: ``make_extended_landmarks({"index": 1.3}, thumb_ext=1.5) -> (21, 3) array``."""
+    return _build_extended_landmarks
 
 
 @pytest.fixture

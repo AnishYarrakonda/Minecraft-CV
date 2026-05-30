@@ -28,7 +28,7 @@ _MOUSE_BUTTONS = ("mouse_left", "mouse_right", "mouse_middle")
 class MacInputEmitter(InputEmitter):
     """Emits real keyboard/mouse events on macOS via pynput + Quartz CGEvent."""
 
-    def __init__(self, mouse_delta_scale: float = 5.0, key_repeat_guard_ms: float = 50.0) -> None:
+    def __init__(self, mouse_delta_scale: float = 15.0, key_repeat_guard_ms: float = 50.0) -> None:
         """Construct the emitter and verify input permissions.
 
         Args:
@@ -65,6 +65,10 @@ class MacInputEmitter(InputEmitter):
         self._mouse_mod: Any = mouse
         self._quartz: Any = Quartz
         self._last_emit: dict[str, float] = {}
+        # Fractional-pixel carry for mouse-look: small per-frame deltas would otherwise round
+        # to 0 px every frame (slow looks never move, fast looks jump). Accumulate the residual.
+        self._move_accum_x = 0.0
+        self._move_accum_y = 0.0
 
         self._check_permissions()
 
@@ -137,8 +141,14 @@ class MacInputEmitter(InputEmitter):
 
     def _emit_mouse_move(self, dx: float, dy: float) -> None:
         q = self._quartz
-        sx = int(round(dx * self.mouse_delta_scale))
-        sy = int(round(dy * self.mouse_delta_scale))
+        # Accumulate sub-pixel motion and emit only the whole-pixel part, carrying the
+        # remainder so a steady slow look still advances instead of rounding away to nothing.
+        self._move_accum_x += dx * self.mouse_delta_scale
+        self._move_accum_y += dy * self.mouse_delta_scale
+        sx = int(self._move_accum_x)
+        sy = int(self._move_accum_y)
+        self._move_accum_x -= sx
+        self._move_accum_y -= sy
         if sx == 0 and sy == 0:
             return
         event = q.CGEventCreateMouseEvent(

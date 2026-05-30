@@ -56,6 +56,16 @@ class InputEmitter(ABC):
         if clicks:
             self._emit_scroll(clicks)
 
+    def key_tap(self, key: str) -> None:
+        """Emit a momentary key tap (down + immediate up). Not tracked in held_keys.
+
+        Used for one-shot actions like opening inventory (E), throwing items (Q),
+        or switching offhand (F) where the gesture maps to a single key press
+        rather than a hold.
+        """
+        self._emit_key_down(key)
+        self._emit_key_up(key)
+
     def release_all(self) -> None:
         """Release every currently-held key/button. The OS-level fail-safe backstop."""
         for key in sorted(self._held_keys):
@@ -104,6 +114,12 @@ class NullEmitter(InputEmitter):
 
     def _emit_scroll(self, clicks: int) -> None:
         self.log.append(("scroll", str(clicks)))
+
+    def key_tap(self, key: str) -> None:
+        self.log.append(("key_tap", key))
+        # Still emit the actual down/up for backends that need it
+        self._emit_key_down(key)
+        self._emit_key_up(key)
 
 
 def create_emitter(settings: Settings) -> InputEmitter:

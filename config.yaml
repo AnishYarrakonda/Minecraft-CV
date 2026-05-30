@@ -8,6 +8,7 @@ camera:
   height: 480
   fps: 30
   backend: avfoundation     # forced on macOS
+  mirror: true              # flip horizontally -> mirror view; also fixes MediaPipe handedness
 
 tracking:
   backend: mediapipe        # mediapipe | yolo
@@ -16,18 +17,41 @@ tracking:
   min_detection_confidence: 0.5
   min_tracking_confidence: 0.5
   max_num_hands: 2
+  swap_handedness: true     # invert MediaPipe L/R labels to fix mirrored camera mapping
 
 gestures:
   left_hand:
-    jump:                   # thumb -> index
-      finger: index
-      t_engage: 0.30
-      t_release: 0.45
-    sneak:                  # thumb -> middle
-      finger: middle
-      t_engage: 0.30
-      t_release: 0.45
+    # Extension-based gestures: closed fist is default; extending specific fingers triggers
+    # gestures. Each threshold is on a continuous extension ratio fed into a Schmitt trigger.
+    jump:                   # thumb extended outward from fist
+      type: thumb_out
+      t_engage: 1.2         # normalized thumb-tip-to-index-MCP / hand-scale
+      t_release: 0.9
+    sneak:                  # index finger extended from fist (others curled)
+      type: index_only
+      t_engage: 1.15        # wrist-to-tip / wrist-to-pip ratio
+      t_release: 1.05
+    sprint:                 # middle finger extended from fist (others curled)
+      type: middle_only
+      t_engage: 1.15
+      t_release: 1.05
+    inventory:              # index + middle extended ("peace sign")
+      type: index_middle
+      t_engage: 1.15
+      t_release: 1.05
+      pulse: true           # one-shot key tap, not a hold
+    throw_item:             # ring finger extended from fist
+      type: ring_only
+      t_engage: 1.15
+      t_release: 1.05
+      pulse: true
+    switch_offhand:         # pinky finger extended from fist
+      type: pinky_only
+      t_engage: 1.15
+      t_release: 1.05
+      pulse: true
   right_hand:
+    # Pinch-based gestures: thumb-to-fingertip distances.
     attack:                 # thumb -> index
       finger: index
       t_engage: 0.30
@@ -36,45 +60,45 @@ gestures:
       finger: middle
       t_engage: 0.30
       t_release: 0.45
-
-# --- V2 (defined for forward-readiness; NOT wired into the MVP pipeline) -----
-# Ring/pinky hotbar gestures are bypassed in the MVP per .claude/rules/gestures.md.
-# Uncomment + implement pulse/cooldown debouncing (gestures.md) before enabling.
-#   left_hand:
-#     inventory:            # full fist -> mode switch (E)
-#       finger: fist
-#       t_engage: 0.20
-#       t_release: 0.35
-#   right_hand:
-#     hotbar_next:          # thumb -> ring  (momentary pulse + cooldown)
-#       finger: ring
-#       t_engage: 0.30
-#       t_release: 0.45
-#     hotbar_prev:          # thumb -> pinky (momentary pulse + cooldown)
-#       finger: pinky
-#       t_engage: 0.30
-#       t_release: 0.45
+    hotbar_next:            # thumb -> ring (scroll up)
+      finger: ring
+      t_engage: 0.30
+      t_release: 0.45
+    hotbar_prev:            # thumb -> pinky (scroll down)
+      finger: pinky
+      t_engage: 0.30
+      t_release: 0.45
 
 joystick:
   deadzone_radius: 0.05     # normalized units; sphere radius (not a box)
-  sensitivity: 2.0
-  accel_exponent: 2.0       # exponential acceleration curve (mitigates Gorilla Arm)
+  sensitivity: 2.0          # travel-to-saturation gain: full output at (1/sensitivity) travel
+  accel_exponent: 2.0       # ease-in curve over [0,1] (gentle near center, fast at the edge)
   anchor: wrist             # wrist (landmark 0) | middle_mcp (landmark 9)
-  max_output: 1.0           # clamp on per-axis joystick magnitude after accel curve
+  max_output: 1.0           # output magnitude at saturation
+  smoothing: 0.6            # EMA on anchor position (0=none ->1=heavy); kills jitter/chatter
+  recenter_grace_frames: 3  # tolerate brief dropouts before recentering the neutral
+  cardinal_half_width: 35.0 # degrees; pure cardinal zone = ±35° from each axis direction
 
 input:
   enabled: false            # NullEmitter unless explicitly enabled (--input overrides)
-  mouse_delta_scale: 5.0    # joystick units -> CGEvent relative pixels for camera look
-  scroll_repeat_rate_hz: 8  # hotbar pulse re-emit rate while a pinch is held (V2)
+  mouse_delta_scale: 15.0   # joystick units [0,1] -> CGEvent relative pixels for camera look
+  scroll_repeat_rate_hz: 8  # hotbar pulse re-emit rate while a pinch is held
   key_repeat_guard_ms: 50   # minimum interval between repeated discrete events
 
 # gesture -> game key/button binding (loaded from config, never hardcoded in src/)
 bindings:
+  # Left-hand discrete gestures.
   jump: space
   sneak: shift
+  sprint: ctrl
+  inventory: e
+  throw_item: q
+  switch_offhand: f
+  # Right-hand discrete gestures.
   attack: mouse_left
   use: mouse_right
-  inventory: e
+  hotbar_next: scroll_up
+  hotbar_prev: scroll_down
   # Left-hand spatial-joystick translation -> WASD.
   forward: w
   back: s

@@ -20,6 +20,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 FingerName = Literal["index", "middle", "ring", "pinky", "fist"]
 Anchor = Literal["wrist", "middle_mcp"]
+ExtensionGestureType = Literal[
+    "thumb_out", "index_only", "middle_only", "index_middle", "ring_only", "pinky_only"
+]
 
 
 class CameraSettings(BaseModel):
@@ -32,6 +35,13 @@ class CameraSettings(BaseModel):
     height: int = 480
     fps: int = 30
     backend: str = "avfoundation"
+    mirror: bool = True
+    """Horizontally flip each frame so the view behaves like a mirror.
+
+    A webcam pointed at the user is *not* mirrored: moving a hand right makes it travel left
+    on screen, which is disorienting and inverts left-hand WASD. Flipping before tracking also
+    fixes MediaPipe handedness, which is labelled assuming a mirrored (selfie) image.
+    """
 
 
 class TrackingSettings(BaseModel):
@@ -45,10 +55,18 @@ class TrackingSettings(BaseModel):
     min_detection_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     min_tracking_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     max_num_hands: int = Field(default=2, ge=1, le=2)
+    swap_handedness: bool = True
+    """Invert MediaPipe Left/Right handedness labels.
+
+    With ``mirror: true``, the user's physical left hand appears on the left side of the
+    image. MediaPipe may label this as ``"Left"`` (matching image convention) but the pipeline
+    expects the user's physical left hand to drive the left-hand gestures/WASD. If the labels
+    come out swapped, enabling this flag fixes it.
+    """
 
 
 class GestureThresholds(BaseModel):
-    """Schmitt-trigger thresholds for one discrete pinch gesture.
+    """Schmitt-trigger thresholds for one discrete pinch gesture (right hand).
 
     Attributes:
         finger: Which fingertip's thumb-pinch drives this gesture.
@@ -74,10 +92,54 @@ class GestureThresholds(BaseModel):
         return self
 
 
-def _default_left_gestures() -> dict[str, GestureThresholds]:
+class ExtensionThresholds(BaseModel):
+    """Schmitt-trigger thresholds for one finger-extension gesture (left hand).
+
+    Extension gestures detect which fingers are extended (straightened) vs. curled
+    (closed into fist). Unlike pinch gestures where *lower* distance engages, extension
+    gestures engage when the extension ratio goes *above* the engage threshold.
+
+    Attributes:
+        type: The finger combination pattern that triggers this gesture.
+        t_engage: Extension ratio above which the gesture engages (KEY_DOWN).
+        t_release: Extension ratio below which it releases (KEY_UP). Must be
+            strictly less than ``t_engage`` (inverted Schmitt band for extension).
+        pulse: If True, this gesture fires a single key tap on engage rather than
+            a sustained hold. Used for toggle/one-shot actions (E, Q, F).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    type: ExtensionGestureType
+    t_engage: float = Field(gt=0.0)
+    t_release: float = Field(gt=0.0)
+    pulse: bool = False
+
+    @model_validator(mode="after")
+    def _check_hysteresis(self) -> ExtensionThresholds:
+        if not self.t_engage > self.t_release:
+            raise ValueError(
+                f"t_engage ({self.t_engage}) must be strictly greater than "
+                f"t_release ({self.t_release}) for extension gestures; the Schmitt band "
+                "must have a gap to prevent chatter (hard invariant #1)."
+            )
+        return self
+
+
+def _default_left_gestures() -> dict[str, ExtensionThresholds]:
     return {
-        "jump": GestureThresholds(finger="index", t_engage=0.30, t_release=0.45),
-        "sneak": GestureThresholds(finger="middle", t_engage=0.30, t_release=0.45),
+        "jump": ExtensionThresholds(type="thumb_out", t_engage=1.2, t_release=0.9),
+        "sneak": ExtensionThresholds(type="index_only", t_engage=1.15, t_release=1.05),
+        "sprint": ExtensionThresholds(type="middle_only", t_engage=1.15, t_release=1.05),
+        "inventory": ExtensionThresholds(
+            type="index_middle", t_engage=1.15, t_release=1.05, pulse=True
+        ),
+        "throw_item": ExtensionThresholds(
+            type="ring_only", t_engage=1.15, t_release=1.05, pulse=True
+        ),
+        "switch_offhand": ExtensionThresholds(
+            type="pinky_only", t_engage=1.15, t_release=1.05, pulse=True
+        ),
     }
 
 
@@ -85,16 +147,26 @@ def _default_right_gestures() -> dict[str, GestureThresholds]:
     return {
         "attack": GestureThresholds(finger="index", t_engage=0.30, t_release=0.45),
         "use": GestureThresholds(finger="middle", t_engage=0.30, t_release=0.45),
+        "hotbar_next": GestureThresholds(finger="ring", t_engage=0.30, t_release=0.45),
+        "hotbar_prev": GestureThresholds(finger="pinky", t_engage=0.30, t_release=0.45),
     }
 
 
 class GestureSettings(BaseModel):
-    """Per-hand maps of gesture-name -> Schmitt thresholds."""
+    """Per-hand maps of gesture-name -> Schmitt thresholds.
+
+    Left hand uses extension-based gestures (finger combinations from closed fist).
+    Right hand uses pinch-based gestures (thumb-to-fingertip distances).
+    """
 
     model_config = {"extra": "forbid"}
 
-    left_hand: dict[str, GestureThresholds] = Field(default_factory=_default_left_gestures)
-    right_hand: dict[str, GestureThresholds] = Field(default_factory=_default_right_gestures)
+    left_hand: dict[str, ExtensionThresholds] = Field(
+        default_factory=_default_left_gestures
+    )
+    right_hand: dict[str, GestureThresholds] = Field(
+        default_factory=_default_right_gestures
+    )
 
 
 class JoystickSettings(BaseModel):
@@ -111,6 +183,27 @@ class JoystickSettings(BaseModel):
     accel_exponent: float = Field(default=2.0, gt=0.0)
     anchor: Anchor = "wrist"
     max_output: float = Field(default=1.0, gt=0.0)
+    smoothing: float = Field(default=0.6, ge=0.0, lt=1.0)
+    """EMA smoothing factor on the anchor position (0 = none, ->1 = heavy).
+
+    Cuts MediaPipe landmark jitter before it reaches the deadzone/accel curve so the
+    joystick output flows instead of chattering. Higher = calmer but slightly more lag.
+    """
+    recenter_grace_frames: int = Field(default=3, ge=0)
+    """Consecutive missing-hand frames tolerated before the neutral is recentered.
+
+    A single dropped frame should not snap the neutral to a new position (a jarring jump on
+    the next frame). The hand's keys are still released immediately on any miss; only the
+    recenter macro waits for a sustained dropout.
+    """
+    cardinal_half_width: float = Field(default=35.0, ge=0.0, le=45.0)
+    """Half-width (degrees) of each pure cardinal direction zone.
+
+    With the default of 35°, each axis has a 70° zone (±35°) where only that axis's key is
+    pressed (pure W, pure D, etc.). The remaining 20° between zones produces diagonal
+    movement (W+D, etc.). Set to 45° for no diagonals; set to 0° for the old behavior
+    where any non-zero component always fires.
+    """
 
 
 class InputSettings(BaseModel):
@@ -119,7 +212,7 @@ class InputSettings(BaseModel):
     model_config = {"extra": "forbid"}
 
     enabled: bool = False
-    mouse_delta_scale: float = Field(default=5.0, gt=0.0)
+    mouse_delta_scale: float = Field(default=15.0, gt=0.0)
     scroll_repeat_rate_hz: float = Field(default=8.0, gt=0.0)
     key_repeat_guard_ms: float = Field(default=50.0, ge=0.0)
 
@@ -135,12 +228,18 @@ class DebugSettings(BaseModel):
 
 def _default_bindings() -> dict[str, str]:
     return {
-        # Discrete pinch gestures.
+        # Left-hand discrete gestures.
         "jump": "space",
         "sneak": "shift",
+        "sprint": "ctrl",
+        "inventory": "e",
+        "throw_item": "q",
+        "switch_offhand": "f",
+        # Right-hand discrete gestures.
         "attack": "mouse_left",
         "use": "mouse_right",
-        "inventory": "e",
+        "hotbar_next": "scroll_up",
+        "hotbar_prev": "scroll_down",
         # Left-hand spatial-joystick translation -> WASD.
         "forward": "w",
         "back": "s",

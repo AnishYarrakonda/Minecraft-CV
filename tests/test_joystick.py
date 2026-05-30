@@ -92,6 +92,45 @@ def test_reset_neutral_recalibrates() -> None:
     assert np.allclose(j.neutral, [0.1, 0.1])
 
 
+def test_zero_smoothing_tracks_raw_sample() -> None:
+    # Default smoothing is 0 for direct construction -> output tracks the raw sample exactly
+    # (the unit tests stay deterministic; production smoothing is supplied via Settings).
+    j = DeadzoneJoystick(0.05, 2.0, 2.0)
+    assert j.smoothing == 0.0
+    j.recenter(NEUTRAL)
+    raw = j.update(NEUTRAL + np.array([0.30, 0.0]))
+    # Same construction with the EMA disabled gives the identical magnitude as the old path.
+    expected_travel = min((0.30 - 0.05) * 2.0, 1.0)
+    assert float(np.linalg.norm(raw)) == pytest.approx(expected_travel**2.0, abs=1e-9)
+
+
+def test_smoothing_attenuates_a_single_frame_step() -> None:
+    # With smoothing, one frame of a large jump is damped: the smoothed output is smaller than
+    # the unsmoothed output for the same step (jitter/chatter suppression). The filter is first
+    # primed at the neutral (the very first sample always seeds it, so there is no start lag).
+    raw = DeadzoneJoystick(0.05, 2.0, 2.0, 1.0, smoothing=0.0)
+    smooth = DeadzoneJoystick(0.05, 2.0, 2.0, 1.0, smoothing=0.6)
+    step = NEUTRAL + np.array([0.30, 0.0])
+    for j in (raw, smooth):
+        j.recenter(NEUTRAL)
+        assert np.allclose(j.update(NEUTRAL), 0.0)  # prime filter at neutral
+    raw_mag = float(np.linalg.norm(raw.update(step)))
+    smooth_mag = float(np.linalg.norm(smooth.update(step)))
+    assert 0.0 < smooth_mag < raw_mag
+
+
+def test_smoothing_converges_to_steady_state() -> None:
+    # Holding a fixed position, the smoothed output converges toward the unsmoothed output.
+    j = DeadzoneJoystick(0.05, 2.0, 2.0, 1.0, smoothing=0.6)
+    j.recenter(NEUTRAL)
+    pos = NEUTRAL + np.array([0.30, 0.0])
+    last = 0.0
+    for _ in range(50):
+        last = float(np.linalg.norm(j.update(pos)))
+    expected = min((0.30 - 0.05) * 2.0, 1.0) ** 2.0
+    assert last == pytest.approx(expected, abs=1e-6)
+
+
 def test_anchor_xy_extracts_configured_landmark() -> None:
     lm = np.zeros((21, 3), dtype=np.float32)
     lm[ANCHOR_INDEX["wrist"]] = (0.1, 0.2, 0.3)
