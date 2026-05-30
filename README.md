@@ -9,26 +9,44 @@ authoritative design contract (gesture map, Schmitt-trigger invariants, perf rul
 
 ## Setup
 
-```bash
-# Poetry (preferred once installed):
-poetry install
+The `.venv` is already initialized. If you need to reinstall:
 
-# Or plain venv + pip (works with the PEP 621 pyproject):
-python3 -m venv .venv && source .venv/bin/activate
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
 ## Commands
 
-```bash
-mcv-run --config config.yaml --no-input --debug-overlay   # dry run (no OS input)
-mcv-run --config config.yaml --input                      # live (emits input)
-mcv-calibrate --config config.yaml                        # tune thresholds
-mcv-analyze data/clips/foo.mp4 --backend mediapipe        # offline debug
-mcv-bench --backend mediapipe --device mps --frames 2000  # benchmark
+**Use with the venv:**
 
-pytest -k schmitt -x                                       # fast regression
-pytest && ruff check src tests && mypy src                 # full CI gate
+```bash
+# Dry run with camera and debug overlay
+.venv/bin/python -m minecraft_cv.cli --config config.yaml --no-input --debug-overlay
+
+# Live mode (emits real OS input to Minecraft)
+.venv/bin/python -m minecraft_cv.cli --config config.yaml --input --debug-overlay
+
+# Calibrate spatial joystick (guided wizard)
+.venv/bin/python -m minecraft_cv.calibration --config config.yaml --apply
+
+# Offline analysis on a recorded clip
+.venv/bin/python -m minecraft_cv.cli --config config.yaml --clip data/clips/foo.mp4 --debug-overlay
+
+# Run tests
+.venv/bin/python -m pytest                                 # all tests
+.venv/bin/python -m pytest -k schmitt -x                  # fast gesture regression
+
+# Full CI gate
+.venv/bin/python -m pytest && .venv/bin/ruff check src tests && .venv/bin/mypy src
+```
+
+**Or with Poetry (if installed):**
+
+```bash
+poetry install
+poetry run mcv-run --config config.yaml --no-input --debug-overlay
 ```
 
 ## Safety invariants

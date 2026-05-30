@@ -29,3 +29,6 @@ data/clips/*
 
 # Poetry / pip lock artifacts kept, env not
 poetry.lock
+
+# critque
+/review_critique

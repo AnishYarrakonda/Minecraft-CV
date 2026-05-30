@@ -7,18 +7,33 @@ gestures to game input, and emits OS-level events via pynput / Quartz CGEvent.
 ## Quick commands
 
 ```bash
-poetry install                                                   # set up env
-poetry run mcv-run --config config.yaml --no-input --debug-overlay  # dry run
-poetry run mcv-run --config config.yaml                         # live (emits input)
-poetry run mcv-calibrate                                         # tune thresholds
-poetry run mcv-analyze data/clips/foo.mp4 --backend mediapipe   # offline debug
-poetry run mcv-bench --backend mediapipe --device mps --frames 2000
-poetry run pytest -k schmitt -x                                  # fast regression
-poetry run pytest && ruff check src tests && mypy src            # full CI gate
+# Setup (if needed; .venv already exists)
+source .venv/bin/activate
+
+# Dry run with camera and debug overlay
+.venv/bin/python -m minecraft_cv.cli --config config.yaml --no-input --debug-overlay
+
+# Live mode (emits real OS input)
+.venv/bin/python -m minecraft_cv.cli --config config.yaml --input --debug-overlay
+
+# Calibrate spatial joystick
+.venv/bin/python -m minecraft_cv.calibration --config config.yaml --apply
+
+# Offline clip analysis
+.venv/bin/python -m minecraft_cv.cli --config config.yaml --clip data/clips/foo.mp4 --debug-overlay
+
+# Fast regression test
+.venv/bin/python -m pytest -k schmitt -x
+
+# Full CI gate
+.venv/bin/python -m pytest && .venv/bin/ruff check src tests && .venv/bin/mypy src
 ```
 
-**Always use `--no-input` + a recorded clip when iterating.** Never debug gesture
-logic against live Minecraft — it's non-deterministic and will fling your character.
+**For development, always use one of these patterns:**
+- `--no-input --debug-overlay` with live camera to iterate safely (no real input emitted)
+- `--clip data/clips/foo.mp4 --no-input --debug-overlay` for deterministic testing against recorded footage
+
+Never debug gesture logic against live Minecraft input; it's non-deterministic and will fling your character.
 
 ## Hard invariants
 
