@@ -7,6 +7,7 @@ Heavy libraries (OpenCV, MediaPipe) are imported lazily inside the command bodie
 from __future__ import annotations
 
 import argparse
+import json
 import statistics
 import sys
 import time
@@ -79,14 +80,158 @@ def main_run(argv: list[str] | None = None) -> int:
 
 # --- mcv-calibrate ------------------------------------------------------------
 def main_calibrate(argv: list[str] | None = None) -> int:
-    """Print live normalized thumb-to-fingertip distances to help tune thresholds."""
-    p = argparse.ArgumentParser(prog="mcv-calibrate", description="Tune Schmitt thresholds.")
+    """Guided spatial-joystick calibration wizard (Task 3).
+
+    Walks the user through a neutral pose plus a full push in each cardinal direction, derives
+    ``joystick.deadzone_radius`` + ``joystick.sensitivity`` from the samples, and (with
+    ``--apply``) writes them back to ``config.yaml`` without disturbing any other setting.
+
+    ``--pinch`` keeps the legacy live thumb-to-fingertip distance readout for Schmitt tuning.
+    """
+    p = argparse.ArgumentParser(
+        prog="mcv-calibrate", description="Auto-calibrate the spatial joysticks (or tune pinch)."
+    )
     _add_config_arg(p)
     p.add_argument("--clip", help="calibrate from a clip instead of the live camera")
-    p.add_argument("--hand", choices=["Left", "Right"], default="Right")
+    p.add_argument("--hand", choices=["Left", "Right"], default="Right",
+                   help="MediaPipe handedness label to sample (default: Right)")
+    p.add_argument("--anchor", choices=["wrist", "middle_mcp"], default=None,
+                   help="anchor landmark (default: from config)")
+    p.add_argument("--frames-per-step", type=int, default=60,
+                   help="samples to collect per pose (default: 60)")
+    p.add_argument("--apply", action="store_true", help="write the result back to config.yaml")
+    p.add_argument("--pinch", action="store_true",
+                   help="legacy mode: print live thumb-to-fingertip distances instead")
     args = p.parse_args(argv)
     settings = _load_settings(args.config)
 
+    if args.pinch:
+        return _calibrate_pinch(args, settings)
+    return _calibrate_joysticks(args, settings)
+
+
+def _calibrate_joysticks(args: argparse.Namespace, settings: Settings) -> int:
+    """Run the guided pose wizard and optionally persist the computed joystick settings."""
+    import cv2
+
+    from minecraft_cv.calibration import (
+        REACH_POSES,
+        compute_calibration,
+        load_config_data,
+        merge_calibration,
+        save_config_data,
+    )
+    from minecraft_cv.capture.source import AVFoundationSource, ClipSource
+    from minecraft_cv.tracking.tracker import HandTracker
+
+    anchor = args.anchor or settings.joystick.anchor
+    live = not args.clip
+    try:
+        source = (
+            ClipSource(args.clip)
+            if args.clip
+            else AVFoundationSource(
+                settings.camera.index, settings.camera.width,
+                settings.camera.height, settings.camera.fps,
+            )
+        )
+        tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
+    except (FileNotFoundError, RuntimeError, PermissionError) as exc:
+        print(f"[mcv-calibrate] error: {exc}", file=sys.stderr)
+        return 1
+
+    steps: list[tuple[str, str]] = [
+        ("neutral", "Hold your hand STILL at a comfortable CENTER (neutral) position."),
+        *[(d, f"Push your hand FULLY {d.upper()} and hold it there.") for d in REACH_POSES],
+    ]
+    collected: dict[str, list[np.ndarray]] = {}
+    print("=== mcv-calibrate: spatial joystick wizard ===")
+    print(f"  hand={args.hand}  anchor={anchor}  frames/step={args.frames_per_step}")
+    try:
+        for name, instruction in steps:
+            print(f"\n[{name}] {instruction}")
+            if live:
+                for c in (3, 2, 1):
+                    print(f"  capturing in {c}…", end="\r", flush=True)
+                    time.sleep(1.0)
+            samples = _collect_anchor_samples(
+                source, tracker, args.hand, anchor, args.frames_per_step,
+                settings.camera.mirror, cv2,
+            )
+            collected[name] = samples
+            print(f"  captured {len(samples)} samples for '{name}'.        ")
+    except KeyboardInterrupt:
+        print("\n[mcv-calibrate] aborted; nothing written.")
+        return 1
+    finally:
+        source.release()
+        tracker.close()
+
+    neutral = collected.pop("neutral", [])
+    try:
+        result = compute_calibration(
+            neutral, collected, deadzone_margin=settings.joystick.dynamic_deadzone_margin
+        )
+    except ValueError as exc:
+        print(f"[mcv-calibrate] error: {exc} (was a hand visible?)", file=sys.stderr)
+        return 1
+
+    print("\n=== Result ===")
+    print(f"  neutral        = ({result.neutral[0]:.3f}, {result.neutral[1]:.3f})")
+    print(f"  resting jitter = {result.resting_jitter:.4f}")
+    print(f"  mean reach     = {result.mean_reach:.4f}")
+    print(f"  -> deadzone_radius = {result.joystick_overrides()['deadzone_radius']}")
+    print(f"  -> sensitivity     = {result.joystick_overrides()['sensitivity']}")
+
+    if not args.apply:
+        print("\n[mcv-calibrate] preview only. Re-run with --apply to write to "
+              f"{args.config}.")
+        return 0
+
+    config_path = args.config
+    if not Path(config_path).is_file():
+        print(f"[mcv-calibrate] error: cannot apply; config '{config_path}' does not exist.",
+              file=sys.stderr)
+        return 1
+    merged = merge_calibration(load_config_data(config_path), result)
+    try:
+        Settings(**merged)  # validate before writing — never persist an invalid config.
+    except Exception as exc:  # noqa: BLE001 - surface any validation failure to the user
+        print(f"[mcv-calibrate] error: computed config failed validation: {exc}",
+              file=sys.stderr)
+        return 1
+    save_config_data(config_path, merged)
+    print(f"[mcv-calibrate] wrote joystick calibration to {config_path}.")
+    return 0
+
+
+def _collect_anchor_samples(
+    source: Any, tracker: Any, hand: str, anchor: str, n_frames: int, mirror: bool, cv2: Any
+) -> list[np.ndarray]:
+    """Read frames until ``n_frames`` anchor positions for ``hand`` are collected (or exhausted).
+
+    Returns a list of ``(2,)`` normalized ``(x, y)`` anchor positions. Mirrors each frame to
+    match the live pipeline's frame of reference before tracking.
+    """
+    from minecraft_cv.joystick.deadzone import anchor_xy
+
+    out: list[np.ndarray] = []
+    while len(out) < n_frames:
+        frame = source.read()
+        if frame is None:
+            break
+        if mirror:
+            frame = cv2.flip(frame, 1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        for h in tracker.detect(rgb):
+            if h.handedness == hand:
+                out.append(anchor_xy(h.landmarks, anchor))
+                break
+    return out
+
+
+def _calibrate_pinch(args: argparse.Namespace, settings: Settings) -> int:
+    """Legacy live readout of normalized thumb-to-fingertip distances (Schmitt tuning)."""
     import cv2
 
     from minecraft_cv.capture.source import AVFoundationSource, ClipSource
@@ -97,10 +242,8 @@ def main_calibrate(argv: list[str] | None = None) -> int:
         ClipSource(args.clip)
         if args.clip
         else AVFoundationSource(
-            settings.camera.index,
-            settings.camera.width,
-            settings.camera.height,
-            settings.camera.fps,
+            settings.camera.index, settings.camera.width,
+            settings.camera.height, settings.camera.fps,
         )
     )
     tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
@@ -203,13 +346,17 @@ def main_analyze(argv: list[str] | None = None) -> int:
 
 # --- mcv-bench ----------------------------------------------------------------
 def main_bench(argv: list[str] | None = None) -> int:
-    """Benchmark the tracker over N frames with warmup + p50/p95/p99 reporting."""
+    """Benchmark the tracker over N frames; emit a detailed JSON profiling report (Task 4)."""
     p = argparse.ArgumentParser(prog="mcv-bench", description="Benchmark the tracking backend.")
     p.add_argument("--backend", default="mediapipe")
     p.add_argument("--device", default="auto", choices=["auto", "mps", "cuda", "cpu"])
     p.add_argument("--frames", type=int, default=500)
     p.add_argument("--warmup", type=int, default=20)
     p.add_argument("--clip", help="benchmark on a clip; otherwise synthetic noise frames")
+    p.add_argument("--target-fps", type=float, default=60.0,
+                   help="FPS the mean frame time is checked against (default: 60)")
+    p.add_argument("--json", dest="json_path", nargs="?", const="-", default=None,
+                   help="write the full JSON report to PATH (or stdout if given with no value)")
     args = p.parse_args(argv)
 
     from minecraft_cv.tracking.tracker import HandTracker
@@ -237,12 +384,59 @@ def main_bench(argv: list[str] | None = None) -> int:
     if not times:
         print("[mcv-bench] no timed frames.", file=sys.stderr)
         return 1
-    fps = 1000.0 / statistics.fmean(times)
+
+    summary = _summarize(times)
+    report = {
+        "backend": args.backend,
+        "device": args.device,
+        "frames": len(times),
+        "warmup": args.warmup,
+        "source": f"clip:{args.clip}" if args.clip else "synthetic",
+        "target_fps": args.target_fps,
+        "meets_target": summary["fps_mean"] >= args.target_fps,
+        "detect_ms": summary,
+    }
     print(f"=== mcv-bench backend={args.backend} device={args.device} "
           f"frames={len(times)} (warmup={args.warmup}) ===")
-    print(f"  detect: p50={_pct(times, 50):6.2f}  p95={_pct(times, 95):6.2f}  "
-          f"p99={_pct(times, 99):6.2f}  mean={statistics.fmean(times):6.2f} ms  (~{fps:5.1f} FPS)")
+    print(f"  detect: p50={summary['p50']:6.2f}  p95={summary['p95']:6.2f}  "
+          f"p99={summary['p99']:6.2f}  mean={summary['mean']:6.2f} ms  "
+          f"jitter(std)={summary['jitter_std']:5.2f}  (~{summary['fps_mean']:5.1f} FPS)")
+    status = "PASS" if report["meets_target"] else "FAIL"
+    print(f"  target {args.target_fps:.0f} FPS: {status}")
+
+    if args.json_path is not None:
+        blob = json.dumps(report, indent=2)
+        if args.json_path == "-":
+            print(blob)
+        else:
+            Path(args.json_path).write_text(blob + "\n")
+            print(f"  wrote JSON report to {args.json_path}")
     return 0
+
+
+def _summarize(times: list[float]) -> dict[str, float]:
+    """Summary statistics for a list of per-frame latencies in milliseconds.
+
+    Args:
+        times: Per-frame detect latencies (ms). Must be non-empty.
+
+    Returns:
+        A dict with count, p50/p95/p99, mean, min, max, ``jitter_std`` (latency standard
+        deviation — the tail-instability signal that matters for a real-time loop), and
+        ``fps_mean`` (``1000 / mean``).
+    """
+    mean = statistics.fmean(times)
+    return {
+        "count": float(len(times)),
+        "p50": _pct(times, 50),
+        "p95": _pct(times, 95),
+        "p99": _pct(times, 99),
+        "mean": mean,
+        "min": min(times),
+        "max": max(times),
+        "jitter_std": statistics.pstdev(times) if len(times) > 1 else 0.0,
+        "fps_mean": 1000.0 / mean if mean > 0 else float("inf"),
+    }
 
 
 def _bench_frames(args: argparse.Namespace) -> list[np.ndarray]:

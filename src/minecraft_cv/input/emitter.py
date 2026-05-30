@@ -51,6 +51,18 @@ class InputEmitter(ABC):
         """Emit a relative mouse-look delta in screen pixels (camera rotation)."""
         self._emit_mouse_move(dx, dy)
 
+    def mouse_move_abs(self, x: float, y: float) -> None:
+        """Warp the cursor to an absolute normalized screen position (inventory mode).
+
+        Args:
+            x: Target screen x in ``[0, 1]`` (0 = left edge, 1 = right edge).
+            y: Target screen y in ``[0, 1]`` (0 = top edge, 1 = bottom edge).
+
+        Used only in inventory mode, where the cursor must move freely over the GUI without
+        rotating the camera. Backends scale the normalized coords to the main display size.
+        """
+        self._emit_mouse_move_abs(x, y)
+
     def scroll(self, clicks: int) -> None:
         """Emit ``clicks`` scroll ticks (positive = up = hotbar next)."""
         if clicks:
@@ -88,6 +100,9 @@ class InputEmitter(ABC):
     def _emit_mouse_move(self, dx: float, dy: float) -> None: ...
 
     @abstractmethod
+    def _emit_mouse_move_abs(self, x: float, y: float) -> None: ...
+
+    @abstractmethod
     def _emit_scroll(self, clicks: int) -> None: ...
 
 
@@ -111,6 +126,9 @@ class NullEmitter(InputEmitter):
 
     def _emit_mouse_move(self, dx: float, dy: float) -> None:
         self.log.append(("mouse_move", f"{dx:.6f}", f"{dy:.6f}"))
+
+    def _emit_mouse_move_abs(self, x: float, y: float) -> None:
+        self.log.append(("mouse_move_abs", f"{x:.6f}", f"{y:.6f}"))
 
     def _emit_scroll(self, clicks: int) -> None:
         self.log.append(("scroll", str(clicks)))

@@ -65,6 +65,14 @@ class MacInputEmitter(InputEmitter):
         self._mouse_mod: Any = mouse
         self._quartz: Any = Quartz
         self._last_emit: dict[str, float] = {}
+        # Main-display pixel size, for mapping normalized absolute-cursor coords (inventory
+        # mode) to physical pixels. Resolved once; a multi-monitor V2 can refine this.
+        try:
+            main = Quartz.CGMainDisplayID()
+            self._screen_w = float(Quartz.CGDisplayPixelsWide(main))
+            self._screen_h = float(Quartz.CGDisplayPixelsHigh(main))
+        except Exception:  # pragma: no cover - environment-dependent
+            self._screen_w, self._screen_h = 1920.0, 1080.0
         # Fractional-pixel carry for mouse-look: small per-frame deltas would otherwise round
         # to 0 px every frame (slow looks never move, fast looks jump). Accumulate the residual.
         self._move_accum_x = 0.0
@@ -156,6 +164,17 @@ class MacInputEmitter(InputEmitter):
         )
         q.CGEventSetIntegerValueField(event, q.kCGMouseEventDeltaX, sx)
         q.CGEventSetIntegerValueField(event, q.kCGMouseEventDeltaY, sy)
+        q.CGEventPost(q.kCGHIDEventTap, event)
+
+    def _emit_mouse_move_abs(self, x: float, y: float) -> None:
+        q = self._quartz
+        # Clamp normalized coords and scale to main-display pixels. Absolute warp (no delta
+        # fields) so the cursor jumps to the GUI position without rotating the camera.
+        px = min(max(x, 0.0), 1.0) * self._screen_w
+        py = min(max(y, 0.0), 1.0) * self._screen_h
+        event = q.CGEventCreateMouseEvent(
+            None, q.kCGEventMouseMoved, (px, py), q.kCGMouseButtonLeft
+        )
         q.CGEventPost(q.kCGHIDEventTap, event)
 
     def _emit_scroll(self, clicks: int) -> None:

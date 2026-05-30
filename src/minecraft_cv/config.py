@@ -64,6 +64,20 @@ class TrackingSettings(BaseModel):
     come out swapped, enabling this flag fixes it.
     """
 
+    # --- Tracking-loss recovery (Task 5) ----------------------------------------------
+    min_emit_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    """Drop any detected hand whose handedness score is below this before it reaches the
+    pipeline. ``0.0`` (default) keeps every hand. Raising it treats low-confidence detections
+    as *absent*, feeding them into the same fail-safe/recovery path as a true dropout."""
+    dropout_flush_ms: float = Field(default=100.0, ge=0.0)
+    """If a hand is continuously absent for longer than this, perform a *hard flush*: release
+    every key that hand could hold and reset its joystick neutral + look filter. (Per-frame
+    key release still happens immediately; this governs the heavier recenter/flush.)"""
+    stabilization_ms: float = Field(default=500.0, ge=0.0)
+    """After a hard flush, suppress *all* input from a returning hand for this long while its
+    coordinates are tracked to re-establish a neutral origin — prevents a violent camera snap
+    on re-entry. ``0`` disables the stabilization window."""
+
 
 class GestureThresholds(BaseModel):
     """Schmitt-trigger thresholds for one discrete pinch gesture (right hand).
@@ -205,6 +219,58 @@ class JoystickSettings(BaseModel):
     where any non-zero component always fires.
     """
 
+    # --- Dynamic deadzone (V2) ---------------------------------------------------------
+    dynamic_deadzone: bool = False
+    """Adapt the deadzone radius to the user's resting hand jitter (V2).
+
+    When enabled, each joystick spends the first ``calibration_frames`` samples after
+    (re)centering measuring how far the resting anchor wanders, then grows its effective
+    deadzone to ``deadzone_radius + dynamic_deadzone_margin * jitter`` so resting tremor never
+    leaks into movement. Default False preserves the static ``deadzone_radius`` behavior.
+    """
+    calibration_frames: int = Field(default=150, ge=0)
+    """Resting samples collected to estimate jitter (~5 s at 30 FPS). Output is held at zero
+    during this window; recentering (recenter macro) restarts calibration."""
+    dynamic_deadzone_margin: float = Field(default=1.5, ge=0.0)
+    """Multiplier on the measured resting-jitter radius added to the base deadzone."""
+
+    # --- Mouse-look smoothing (V2) -----------------------------------------------------
+    look_filter: Literal["ema", "one_euro"] = "one_euro"
+    """Smoothing applied to the right-hand mouse-look output before emission.
+
+    ``ema`` relies solely on the joystick's ``smoothing`` (uniform lag). ``one_euro`` adds a
+    velocity-adaptive One-Euro filter that is steady at rest and snappy in motion — the
+    recommended setting for camera look.
+    """
+    one_euro_min_cutoff: float = Field(default=1.0, gt=0.0)
+    """One-Euro baseline cutoff (Hz): lower = smoother at rest, more lag."""
+    one_euro_beta: float = Field(default=0.007, ge=0.0)
+    """One-Euro speed coefficient: higher = less lag during fast looks, more jitter."""
+    one_euro_d_cutoff: float = Field(default=1.0, gt=0.0)
+    """One-Euro derivative cutoff (Hz) for the internal speed estimate."""
+
+
+class SprintVelocitySettings(BaseModel):
+    """Depth-velocity Sprint trigger (Task 2).
+
+    A quick forward push of the left hand toward the camera engages Sprint (``Ctrl`` held
+    alongside ``W``); it holds while the hand stays forward and releases on retreat. Because
+    MediaPipe's ``z`` axis is the least reliable landmark coordinate, this is **disabled by
+    default** — enable it deliberately, and consider dropping the static ``sprint`` extension
+    gesture from ``gestures.left_hand`` so the two do not both drive ``Ctrl``.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    enabled: bool = False
+    v_sprint: float = Field(default=1.0, gt=0.0)
+    """Forward-velocity threshold in normalized-``z`` units per second to count toward engaging."""
+    trigger_frames: int = Field(default=3, ge=1)
+    """Consecutive above-threshold frames required to engage (the "over N frames" debounce)."""
+    release_margin: float = Field(default=0.02, ge=0.0)
+    """Normalized-``z`` hysteresis band: sprint releases once ``z`` retreats back above
+    ``neutral_z - release_margin``."""
+
 
 class InputSettings(BaseModel):
     """OS-input emission parameters. ``enabled`` is False by default (NullEmitter)."""
@@ -217,6 +283,34 @@ class InputSettings(BaseModel):
     key_repeat_guard_ms: float = Field(default=50.0, ge=0.0)
 
 
+class InventorySettings(BaseModel):
+    """Inventory-mode toggle + absolute-cursor parameters (V2).
+
+    Inventory mode is toggled by a deliberate two-hand pose (both palms fully open, held).
+    While active, WASD translation and relative mouse-look are paused; the right hand drives
+    the OS cursor in **absolute** screen coordinates and the right-hand pinches act as
+    left/right clicks (a held pinch is a click-and-drag).
+    """
+
+    model_config = {"extra": "forbid"}
+
+    enabled: bool = True
+    open_threshold: float = Field(default=1.1, gt=0.0)
+    """Finger extension ratio above which a finger counts as extended for the open-palm pose."""
+    thumb_open_threshold: float = Field(default=0.9, gt=0.0)
+    """Thumb lateral-extension ratio above which the thumb counts as open."""
+    hold_frames: int = Field(default=8, ge=1)
+    """Consecutive both-palms-open frames required before the mode toggles (debounce)."""
+    cooldown_frames: int = Field(default=20, ge=0)
+    """Minimum frames between successive toggles (prevents immediate re-toggle)."""
+    cursor_gain: float = Field(default=1.0, gt=0.0)
+    """Gain mapping normalized hand displacement to normalized screen displacement.
+
+    The right-hand anchor's frame position (already in ``[0, 1]``) is mapped to a screen
+    position about screen-center, scaled by this gain and clamped to ``[0, 1]``.
+    """
+
+
 class DebugSettings(BaseModel):
     """Debug overlay + logging. Never INFO-per-frame; rate-limited counters only."""
 
@@ -224,6 +318,11 @@ class DebugSettings(BaseModel):
 
     overlay: bool = False
     log_level: str = "WARNING"
+    overlay_every: int = Field(default=1, ge=1)
+    """Render the debug overlay on every Nth processed frame (Task 4 frame-dropping). ``1``
+    draws every frame; ``2`` draws every other frame, etc. Tracking/gesture/input still run
+    every frame — only the (non-free) HighGUI draw + ``imshow`` is decimated to protect the
+    real-time loop. Ignored when ``overlay`` is False."""
 
 
 def _default_bindings() -> dict[str, str]:
@@ -277,7 +376,9 @@ class Settings(BaseSettings):
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
     gestures: GestureSettings = Field(default_factory=GestureSettings)
     joystick: JoystickSettings = Field(default_factory=JoystickSettings)
+    sprint: SprintVelocitySettings = Field(default_factory=SprintVelocitySettings)
     input: InputSettings = Field(default_factory=InputSettings)
+    inventory: InventorySettings = Field(default_factory=InventorySettings)
     bindings: dict[str, str] = Field(default_factory=_default_bindings)
     debug: DebugSettings = Field(default_factory=DebugSettings)
 

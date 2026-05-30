@@ -96,3 +96,12 @@ class TrackingLossGuard:
             and then also calls ``emitter.release_all()`` as the OS-level backstop.
         """
         return self._left.reset() + self._right.reset()
+
+    def reset_left(self) -> list[AnyGestureEvent]:
+        """Release every held LEFT-hand gesture (e.g. on entering inventory mode).
+
+        Returns:
+            One ``KEY_UP`` event per left-hand gesture that had been holding; empty if none.
+            Idempotent.
+        """
+        return self._left.reset()

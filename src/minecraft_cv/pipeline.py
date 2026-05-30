@@ -14,16 +14,21 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from minecraft_cv.gestures.extension import ExtensionStateMachine, GestureEvent
-from minecraft_cv.gestures.pinch import KEY_DOWN, GestureEvent as PinchGestureEvent, PinchStateMachine
+from minecraft_cv.gestures.extension import ExtensionStateMachine
+from minecraft_cv.gestures.inventory import InventoryModeToggle
+from minecraft_cv.gestures.pinch import KEY_DOWN, PinchStateMachine
 from minecraft_cv.gestures.safety import TrackingLossGuard
 from minecraft_cv.input.emitter import InputEmitter, create_emitter
-from minecraft_cv.joystick.deadzone import DeadzoneJoystick, anchor_xy
+from minecraft_cv.joystick.deadzone import ANCHOR_INDEX, DeadzoneJoystick, anchor_xy
+from minecraft_cv.joystick.one_euro import OneEuroFilter
+from minecraft_cv.joystick.sprint_velocity import ENGAGE, RELEASE, SprintVelocityTrigger
+from minecraft_cv.recovery import HandRecovery, RecoveryDecision
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
 
 if TYPE_CHECKING:
@@ -39,6 +44,7 @@ class StepResult:
     left_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
     right_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
     wasd_held: frozenset[str] = field(default_factory=frozenset)
+    inventory_active: bool = False
 
 
 class Pipeline:
@@ -57,6 +63,14 @@ class Pipeline:
         swap_handedness: bool = True,
         pulse_gestures: frozenset[str] = frozenset(),
         scroll_repeat_rate_hz: float = 8.0,
+        look_filter: OneEuroFilter | None = None,
+        inventory_toggle: InventoryModeToggle | None = None,
+        cursor_gain: float = 1.0,
+        sprint_trigger: SprintVelocityTrigger | None = None,
+        left_recovery: HandRecovery | None = None,
+        right_recovery: HandRecovery | None = None,
+        min_emit_confidence: float = 0.0,
+        clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         """Assemble a pipeline from already-constructed components.
 
@@ -73,6 +87,21 @@ class Pipeline:
             swap_handedness: If True, invert MediaPipe L/R labels in ``_split``.
             pulse_gestures: Set of gesture names that fire as one-shot key taps.
             scroll_repeat_rate_hz: Repeat rate for hotbar scroll while pinch is held.
+            look_filter: Optional One-Euro filter smoothing the right-hand mouse-look output
+                before emission. ``None`` falls back to the joystick's EMA smoothing only.
+            inventory_toggle: Optional two-hand-pose detector for inventory mode. ``None``
+                disables inventory mode entirely.
+            cursor_gain: Gain mapping the right-hand normalized anchor displacement to
+                normalized screen displacement when driving the absolute cursor (inventory).
+            sprint_trigger: Optional depth-velocity Sprint trigger (Task 2). ``None`` disables
+                velocity sprint (the static extension ``sprint`` gesture is unaffected).
+            left_recovery: Per-hand tracking-loss recovery controller for the left hand
+                (Task 5). ``None`` builds a default one.
+            right_recovery: As above for the right hand.
+            min_emit_confidence: Drop detected hands whose handedness score is below this in
+                :meth:`_split` (they are then treated as absent by the recovery path).
+            clock: Monotonic seconds source; injectable for deterministic tests. Used for
+                scroll-repeat timing, the look filter, sprint velocity, and recovery windows.
         """
         self.emitter = emitter
         self.guard = guard
@@ -85,9 +114,18 @@ class Pipeline:
         self.swap_handedness = swap_handedness
         self.pulse_gestures = pulse_gestures
         self.scroll_repeat_rate_hz = scroll_repeat_rate_hz
+        self.look_filter = look_filter
+        self.inventory_toggle = inventory_toggle
+        self.cursor_gain = float(cursor_gain)
+        self.sprint_trigger = sprint_trigger
+        self.left_recovery = left_recovery if left_recovery is not None else HandRecovery()
+        self.right_recovery = right_recovery if right_recovery is not None else HandRecovery()
+        self.min_emit_confidence = float(min_emit_confidence)
+        self._clock = clock
         self._wasd_held: set[str] = set()
         self._left_miss = 0
         self._right_miss = 0
+        self._sprint_active = False
         # Scroll repeat state: track last scroll time per direction for rate limiting.
         self._last_scroll_time: dict[str, float] = {}
 
@@ -109,12 +147,46 @@ class Pipeline:
         right_sm = PinchStateMachine("right", settings.gestures.right_hand)
         guard = TrackingLossGuard(left_sm, right_sm)
         j = settings.joystick
+        dz = dict(
+            dynamic=j.dynamic_deadzone,
+            calibration_frames=j.calibration_frames,
+            dynamic_margin=j.dynamic_deadzone_margin,
+        )
         left_joy = DeadzoneJoystick(
-            j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output, j.smoothing
+            j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output, j.smoothing, **dz
         )
         right_joy = DeadzoneJoystick(
-            j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output, j.smoothing
+            j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output, j.smoothing, **dz
         )
+        look_filter = (
+            OneEuroFilter(
+                min_cutoff=j.one_euro_min_cutoff,
+                beta=j.one_euro_beta,
+                d_cutoff=j.one_euro_d_cutoff,
+            )
+            if j.look_filter == "one_euro"
+            else None
+        )
+        inv = settings.inventory
+        inventory_toggle = InventoryModeToggle(
+            enabled=inv.enabled,
+            open_threshold=inv.open_threshold,
+            thumb_open_threshold=inv.thumb_open_threshold,
+            hold_frames=inv.hold_frames,
+            cooldown_frames=inv.cooldown_frames,
+        )
+        sp = settings.sprint
+        sprint_trigger = (
+            SprintVelocityTrigger(
+                v_sprint=sp.v_sprint,
+                trigger_frames=sp.trigger_frames,
+                release_margin=sp.release_margin,
+                enabled=True,
+            )
+            if sp.enabled
+            else None
+        )
+        tr = settings.tracking
         return cls(
             emitter=emitter if emitter is not None else create_emitter(settings),
             guard=guard,
@@ -127,6 +199,13 @@ class Pipeline:
             swap_handedness=settings.tracking.swap_handedness,
             pulse_gestures=left_sm.pulse_gestures,
             scroll_repeat_rate_hz=settings.input.scroll_repeat_rate_hz,
+            look_filter=look_filter,
+            inventory_toggle=inventory_toggle,
+            cursor_gain=inv.cursor_gain,
+            sprint_trigger=sprint_trigger,
+            left_recovery=HandRecovery(tr.dropout_flush_ms, tr.stabilization_ms),
+            right_recovery=HandRecovery(tr.dropout_flush_ms, tr.stabilization_ms),
+            min_emit_confidence=tr.min_emit_confidence,
         )
 
     # --- per-frame logic ----------------------------------------------------
@@ -139,10 +218,40 @@ class Pipeline:
         Returns:
             A :class:`StepResult` describing what happened (events + joystick outputs).
         """
+        now = self._clock()
         left_lm, right_lm = self._split(results)
 
-        events = self.guard.process(left_lm, right_lm)
+        # Tracking-loss recovery (Task 5): decide per hand whether to emit, track, or flush.
+        left_dec = self.left_recovery.update(left_lm is not None, now)
+        right_dec = self.right_recovery.update(right_lm is not None, now)
+        if left_dec.flush:
+            self._flush_left()
+        if right_dec.flush:
+            self._flush_right()
+
+        # Inventory-mode toggle is evaluated first; a flip cleans up movement state so the
+        # mode boundary never leaves a key stuck or a stale neutral behind.
+        inventory_active = False
+        if self.inventory_toggle is not None:
+            toggle = self.inventory_toggle.update(left_lm, right_lm)
+            inventory_active = toggle.active
+            if toggle.toggled:
+                self._on_inventory_toggle()
+
+        # Feed each hand's landmarks to its gesture machine only when that hand may emit
+        # (NORMAL phase). Absent or stabilizing -> pass None so the machine resets: no stuck
+        # keys, and no phantom presses fired during the re-entry settle window.
+        events = self.guard.process(
+            left_lm if left_dec.emit else None,
+            right_lm if right_dec.emit else None,
+        )
         for event in events:
+            # In inventory mode, suppress new LEFT-hand gameplay actions (jump/sneak/sprint/
+            # pulses) so menu navigation can't fire them. KEY_UP still passes through so any
+            # key held when the mode was entered is released, never stuck.
+            if inventory_active and event.hand == "left" and event.action == KEY_DOWN:
+                continue
+
             binding = self.bindings.get(event.gesture)
             if binding is None:
                 continue
@@ -159,7 +268,7 @@ class Pipeline:
                 if event.action == KEY_DOWN:
                     direction = 1 if binding == "scroll_up" else -1
                     self.emitter.scroll(direction)
-                    self._last_scroll_time[event.gesture] = time.perf_counter()
+                    self._last_scroll_time[event.gesture] = now
                 elif event.action != KEY_DOWN:
                     self._last_scroll_time.pop(event.gesture, None)
                 continue
@@ -170,22 +279,116 @@ class Pipeline:
                 self.emitter.key_up(binding)
 
         # Handle scroll repeat for held hotbar gestures.
-        self._repeat_scroll()
+        self._repeat_scroll(now)
 
-        left_out = self._update_translation(left_lm)
-        right_out = self._update_look(right_lm)
+        if inventory_active:
+            # WASD paused; the right hand drives the OS cursor in absolute screen coords.
+            self._apply_wasd(set())
+            self._release_sprint()
+            right_out = self._update_cursor(right_lm if right_dec.emit else None)
+            return StepResult(
+                events=events,
+                left_output=self.left_joystick.zero(),
+                right_output=right_out,
+                wasd_held=frozenset(),
+                inventory_active=True,
+            )
+
+        left_out = self._update_translation(left_lm, left_dec, now)
+        right_out = self._update_look(right_lm, right_dec, now)
         return StepResult(
             events=events,
             left_output=left_out,
             right_output=right_out,
             wasd_held=frozenset(self._wasd_held),
+            inventory_active=False,
         )
 
-    def _repeat_scroll(self) -> None:
+    def _on_inventory_toggle(self) -> None:
+        """Clean up movement state when inventory mode flips (either direction).
+
+        Releases held WASD keys and any held left-hand gesture keys, recenters both joysticks,
+        and resets the look filter so neither mode inherits stale state from the other.
+        """
+        self._apply_wasd(set())
+        self._release_sprint()
+        for event in self.guard.reset_left():
+            binding = self.bindings.get(event.gesture)
+            if binding is not None and binding not in ("scroll_up", "scroll_down"):
+                self.emitter.key_up(binding)
+        self.left_joystick.reset_neutral()
+        self.right_joystick.reset_neutral()
+        if self.look_filter is not None:
+            self.look_filter.reset()
+
+    # --- tracking-loss flush helpers (Task 5) -------------------------------
+    def _flush_left(self) -> None:
+        """Hard-flush the left hand after a sustained dropout: recenter + drop sprint."""
+        self._release_sprint()
+        if self.sprint_trigger is not None:
+            self.sprint_trigger.reset_neutral()
+        self.left_joystick.reset_neutral()
+
+    def _flush_right(self) -> None:
+        """Hard-flush the right hand: recenter the look joystick + drop look velocity."""
+        self.right_joystick.reset_neutral()
+        if self.look_filter is not None:
+            self.look_filter.reset()
+
+    def _release_sprint(self) -> None:
+        """Release a held velocity-sprint Ctrl and disarm the trigger (fail-safe)."""
+        if self._sprint_active:
+            key = self.bindings.get("sprint")
+            if key is not None:
+                self.emitter.key_up(key)
+            self._sprint_active = False
+        if self.sprint_trigger is not None:
+            self.sprint_trigger.reset()
+
+    def _update_sprint(self, landmarks: np.ndarray, now: float) -> None:
+        """Advance the depth-velocity sprint trigger and emit/clear the Sprint key (Ctrl).
+
+        Args:
+            landmarks: ``(21, 3)`` left-hand landmarks for this frame.
+            now: Monotonic timestamp (seconds) for the velocity estimate.
+        """
+        if self.sprint_trigger is None:
+            return
+        z = float(landmarks[ANCHOR_INDEX[self.anchor]][2])
+        token = self.sprint_trigger.update(z, now)
+        key = self.bindings.get("sprint")
+        if key is None:
+            return
+        if token == ENGAGE:
+            self.emitter.key_down(key)
+            self._sprint_active = True
+        elif token == RELEASE:
+            self.emitter.key_up(key)
+            self._sprint_active = False
+
+    def _update_cursor(self, landmarks: np.ndarray | None) -> np.ndarray:
+        """Map the right-hand anchor to an absolute cursor position (inventory mode).
+
+        Args:
+            landmarks: ``(21, 3)`` right-hand landmarks, or ``None`` if absent this frame.
+
+        Returns:
+            The ``(2,)`` normalized screen position commanded this frame, or zeros if the hand
+            is absent. Frame of reference: normalized image coords (already mirrored upstream),
+            mapped about screen-center and scaled by ``cursor_gain``, clamped to ``[0, 1]``.
+        """
+        if landmarks is None:
+            return np.zeros(2, dtype=np.float64)
+        pos = anchor_xy(landmarks, self.anchor)
+        screen = 0.5 + (pos - 0.5) * self.cursor_gain
+        screen = np.clip(screen, 0.0, 1.0)
+        self.emitter.mouse_move_abs(float(screen[0]), float(screen[1]))
+        return screen
+
+    def _repeat_scroll(self, now: float) -> None:
         """Re-emit scroll ticks for held hotbar gestures at the configured repeat rate."""
         if not self._last_scroll_time:
             return
-        now = time.perf_counter()
         interval = 1.0 / self.scroll_repeat_rate_hz if self.scroll_repeat_rate_hz > 0 else 1.0
         for gesture, last_time in list(self._last_scroll_time.items()):
             if (now - last_time) >= interval:
@@ -195,28 +398,55 @@ class Pipeline:
                     self.emitter.scroll(direction)
                     self._last_scroll_time[gesture] = now
 
-    def _update_translation(self, landmarks: np.ndarray | None) -> np.ndarray:
-        if landmarks is None:
+    def _update_translation(
+        self, landmarks: np.ndarray | None, dec: RecoveryDecision, now: float
+    ) -> np.ndarray:
+        if not dec.present or landmarks is None:
             self._left_miss += 1
             # Release movement keys immediately (fail-safe), but only recenter the neutral
             # after a *sustained* dropout so a one-frame blip doesn't snap it (recenter macro).
             if self._left_miss >= self.recenter_grace_frames:
                 self.left_joystick.reset_neutral()
             self._apply_wasd(set())
+            self._release_sprint()
             return self.left_joystick.zero()
         self._left_miss = 0
+        if not dec.emit:
+            # Stabilizing on re-entry: feed coords so the neutral re-seeds, but emit nothing.
+            self.left_joystick.update(anchor_xy(landmarks, self.anchor))
+            self._apply_wasd(set())
+            return self.left_joystick.zero()
         out = self.left_joystick.update(anchor_xy(landmarks, self.anchor))
-        self._apply_wasd(self._wasd_targets(out))
+        self._update_sprint(landmarks, now)
+        target = self._wasd_targets(out)
+        if self._sprint_active:
+            # Sprint forces forward (W) held alongside Ctrl, even at joystick neutral.
+            target.add(self.bindings["forward"])
+        self._apply_wasd(target)
         return out
 
-    def _update_look(self, landmarks: np.ndarray | None) -> np.ndarray:
-        if landmarks is None:
+    def _update_look(
+        self, landmarks: np.ndarray | None, dec: RecoveryDecision, now: float
+    ) -> np.ndarray:
+        if not dec.present or landmarks is None:
             self._right_miss += 1
             if self._right_miss >= self.recenter_grace_frames:
                 self.right_joystick.reset_neutral()
+            # Drop the look filter's velocity history so re-entry doesn't jerk the camera.
+            if self.look_filter is not None:
+                self.look_filter.reset()
             return self.right_joystick.zero()
         self._right_miss = 0
+        if not dec.emit:
+            # Stabilizing: re-seed the neutral, keep the filter clear, emit no mouse-look.
+            self.right_joystick.update(anchor_xy(landmarks, self.anchor))
+            if self.look_filter is not None:
+                self.look_filter.reset()
+            return self.right_joystick.zero()
         out = self.right_joystick.update(anchor_xy(landmarks, self.anchor))
+        if self.look_filter is not None:
+            # Velocity-adaptive smoothing: steady at rest, snappy in motion. (Task 4.)
+            out = self.look_filter.filter(out, now)
         if out[0] != 0.0 or out[1] != 0.0:
             self.emitter.mouse_move(float(out[0]), float(out[1]))
         return out
@@ -306,6 +536,9 @@ class Pipeline:
         left: np.ndarray | None = None
         right: np.ndarray | None = None
         for r in results:
+            # Below-confidence detections are treated as absent (fed to the recovery path).
+            if r.score < self.min_emit_confidence:
+                continue
             label = r.handedness
             if self.swap_handedness:
                 label = "Right" if label == "Left" else "Left"
@@ -322,6 +555,7 @@ class Pipeline:
             if binding is not None and binding not in ("scroll_up", "scroll_down"):
                 self.emitter.key_up(binding)
         self._apply_wasd(set())
+        self._release_sprint()
         self._last_scroll_time.clear()
         self.emitter.release_all()
 
@@ -357,8 +591,10 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
     res_w, res_h = settings.tracking.input_resolution
     mirror = settings.camera.mirror
     overlay = settings.debug.overlay
+    overlay_every = max(1, settings.debug.overlay_every)
     window = "minecraft_cv"
     last_seq = -1
+    processed = 0
 
     try:
         while True:
@@ -381,8 +617,11 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
             small = cv2.resize(rgb, (res_w, res_h))
             results = tracker.detect(small)
             result = pipeline.step(results)
+            processed += 1
 
-            if overlay:
+            # Overlay is a debug-only luxury and not free; decimate the (HighGUI) draw to
+            # protect the real-time loop. Tracking/gestures/input still run every frame.
+            if overlay and processed % overlay_every == 0:
                 _draw_overlay(frame, results, result)
                 cv2.imshow(window, frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
