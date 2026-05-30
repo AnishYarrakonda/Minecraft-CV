@@ -30,22 +30,25 @@ class InputEmitter(ABC):
     """
 
     def __init__(self) -> None:
-        self._held_keys: set[str] = set()
+        self._held_keys: dict[str, int] = {}
 
     # --- public API ---------------------------------------------------------
     def key_down(self, key: str) -> None:
-        """Press ``key`` if not already held (idempotent; no auto-repeat spam)."""
-        if key in self._held_keys:
-            return
-        self._held_keys.add(key)
-        self._emit_key_down(key)
+        """Press ``key``. Emits OS down if refcount transitions 0 -> 1."""
+        count = self._held_keys.get(key, 0)
+        self._held_keys[key] = count + 1
+        if count == 0:
+            self._emit_key_down(key)
 
     def key_up(self, key: str) -> None:
-        """Release ``key`` if currently held (no-op otherwise)."""
-        if key not in self._held_keys:
+        """Release ``key``. Emits OS up if refcount transitions 1 -> 0."""
+        count = self._held_keys.get(key, 0)
+        if count <= 0:
             return
-        self._held_keys.discard(key)
-        self._emit_key_up(key)
+        self._held_keys[key] = count - 1
+        if self._held_keys[key] == 0:
+            self._emit_key_up(key)
+            del self._held_keys[key]
 
     def mouse_move(self, dx: float, dy: float) -> None:
         """Emit a relative mouse-look delta in screen pixels (camera rotation)."""
@@ -80,14 +83,15 @@ class InputEmitter(ABC):
 
     def release_all(self) -> None:
         """Release every currently-held key/button. The OS-level fail-safe backstop."""
-        for key in sorted(self._held_keys):
-            self._emit_key_up(key)
+        for key, count in sorted(self._held_keys.items()):
+            if count > 0:
+                self._emit_key_up(key)
         self._held_keys.clear()
 
     @property
     def held_keys(self) -> frozenset[str]:
         """The set of keys/buttons currently held down."""
-        return frozenset(self._held_keys)
+        return frozenset(k for k, v in self._held_keys.items() if v > 0)
 
     # --- primitives implemented by backends ---------------------------------
     @abstractmethod

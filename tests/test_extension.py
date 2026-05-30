@@ -35,6 +35,7 @@ def test_thumb_out_fires_jump(
     
     # Extend thumb past t_engage (1.2)
     lm = make_extended_landmarks({}, thumb_ext=1.5)
+    sm.update(lm)
     events = sm.update(lm)
     assert len(events) == 1
     assert events[0].gesture == "jump"
@@ -46,6 +47,7 @@ def test_thumb_out_fires_jump(
     
     # Drop below t_release (0.9)
     lm = make_extended_landmarks({}, thumb_ext=0.5)
+    sm.update(lm)
     events = sm.update(lm)
     assert len(events) == 1
     assert events[0].gesture == "jump"
@@ -60,6 +62,7 @@ def test_index_only_fires_sneak(
     
     # Extend index past 1.15
     lm = make_extended_landmarks({"index": 1.3})
+    sm.update(lm)
     events = sm.update(lm)
     assert len(events) == 1
     assert events[0].gesture == "sneak"
@@ -73,6 +76,7 @@ def test_middle_only_fires_sprint(
     sm = ExtensionStateMachine("left", gestures)
     
     lm = make_extended_landmarks({"middle": 1.3})
+    sm.update(lm)
     events = sm.update(lm)
     assert len(events) == 1
     assert events[0].gesture == "sprint"
@@ -86,6 +90,7 @@ def test_peace_sign_fires_inventory(
     sm = ExtensionStateMachine("left", gestures)
     
     lm = make_extended_landmarks({"index": 1.3, "middle": 1.3})
+    sm.update(lm)
     events = sm.update(lm)
     assert len(events) == 1
     assert events[0].gesture == "inventory"
@@ -125,6 +130,7 @@ def test_reset_releases_held(
     
     # Hold thumb_out
     lm = make_extended_landmarks({}, thumb_ext=1.5)
+    sm.update(lm)
     sm.update(lm)
     assert "jump" in sm.held
     

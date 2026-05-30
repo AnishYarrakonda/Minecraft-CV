@@ -166,4 +166,5 @@ def test_low_confidence_hand_treated_as_absent(
     # score above the floor -> jump fires.
     clock.t = 0.05
     pipe.step([HandResult(landmarks=lm, handedness="Right", score=0.9)])
+    pipe.step([HandResult(landmarks=lm, handedness="Right", score=0.9)])
     assert ("key_down", "space") in emitter.log

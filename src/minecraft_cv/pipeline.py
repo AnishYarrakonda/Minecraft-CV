@@ -593,11 +593,24 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
     overlay = settings.debug.overlay
     overlay_every = max(1, settings.debug.overlay_every)
     window = "minecraft_cv"
+    
+    # Pre-allocate reuse buffers for the hot loop
+    small_bgr = np.empty((res_h, res_w, 3), dtype=np.uint8)
+    small_rgb = np.empty((res_h, res_w, 3), dtype=np.uint8)
+    
     last_seq = -1
     processed = 0
+    dropped = 0
+    t_start = time.monotonic()
+    last_frame_time = t_start
 
     try:
         while True:
+            if buffer.error:
+                raise buffer.error
+            if time.monotonic() - last_frame_time > 2.0:
+                raise RuntimeError("Camera stalled")
+
             seq, frame = buffer.latest()
             if frame is None:
                 if buffer.exhausted:
@@ -607,15 +620,21 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
             if seq == last_seq:
                 time.sleep(0.001)
                 continue
+            if last_seq != -1 and seq > last_seq + 1:
+                dropped += (seq - last_seq - 1)
             last_seq = seq
+            last_frame_time = time.monotonic()
 
             # Mirror first, in place, so tracking, the joystick vectors, the WASD directions,
             # and the debug overlay all share one consistent (mirrored) frame of reference.
             if mirror:
                 frame = cv2.flip(frame, 1)
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            small = cv2.resize(rgb, (res_w, res_h))
-            results = tracker.detect(small)
+            
+            # Resize BEFORE color convert, and use pre-allocated buffers
+            cv2.resize(frame, (res_w, res_h), dst=small_bgr)
+            cv2.cvtColor(small_bgr, cv2.COLOR_BGR2RGB, dst=small_rgb)
+            
+            results = tracker.detect(small_rgb)
             result = pipeline.step(results)
             processed += 1
 
@@ -629,6 +648,9 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
             if buffer.exhausted:
                 break
     finally:
+        t_elapsed = time.monotonic() - t_start
+        fps = processed / t_elapsed if t_elapsed > 0 else 0.0
+        print(f"Pipeline shutdown. Processed {processed} frames in {t_elapsed:.2f}s ({fps:.1f} FPS), dropped {dropped} frames.")
         pipeline.shutdown()
         buffer.stop()
         tracker.close()

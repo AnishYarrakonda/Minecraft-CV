@@ -40,9 +40,11 @@ def test_single_gesture_engage_release(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = PinchStateMachine("left", LEFT_GESTURES)
+    sm.update(make_landmarks({"index": 0.20}))
     engaged = sm.update(make_landmarks({"index": 0.20}))
     assert _names(engaged) == {("jump", KEY_DOWN)}
     assert sm.update(make_landmarks({"index": 0.20})) == []  # still holding, no new event
+    sm.update(make_landmarks({"index": 0.60}))
     released = sm.update(make_landmarks({"index": 0.60}))
     assert _names(released) == {("jump", KEY_UP)}
 
@@ -51,6 +53,7 @@ def test_two_gestures_same_hand_concurrent(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = PinchStateMachine("left", LEFT_GESTURES)
+    sm.update(make_landmarks({"index": 0.20, "middle": 0.20}))
     events = sm.update(make_landmarks({"index": 0.20, "middle": 0.20}))
     assert _names(events) == {("jump", KEY_DOWN), ("sneak", KEY_DOWN)}
     assert all(e.hand == "left" for e in events)
@@ -63,6 +66,7 @@ def test_thresholds_are_scale_invariant(
 ) -> None:
     # Same normalized distance (0.2) at very different hand scales must engage identically.
     sm = PinchStateMachine("right", {"attack": GestureSpec("index", 0.30, 0.45)})
+    sm.update(make_landmarks({"index": 0.20}, scale=scale))
     events = sm.update(make_landmarks({"index": 0.20}, scale=scale))
     assert _names(events) == {("attack", KEY_DOWN)}
 
@@ -76,6 +80,7 @@ def test_reset_releases_held_gestures(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = PinchStateMachine("left", LEFT_GESTURES)
+    sm.update(make_landmarks({"index": 0.20, "middle": 0.20}))
     sm.update(make_landmarks({"index": 0.20, "middle": 0.20}))
     released = sm.reset()
     assert _names(released) == {("jump", KEY_UP), ("sneak", KEY_UP)}

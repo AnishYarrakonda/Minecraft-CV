@@ -28,6 +28,7 @@ class FrameBuffer:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._exhausted = False
+        self.error: Exception | None = None
 
     def start(self) -> FrameBuffer:
         """Start the background capture thread (idempotent)."""
@@ -38,7 +39,12 @@ class FrameBuffer:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            frame = self._source.read()
+            try:
+                frame = self._source.read()
+            except Exception as e:
+                self.error = e
+                self._exhausted = True
+                break
             if frame is None:
                 # Source exhausted (clip ended) or a transient miss: stop reading.
                 self._exhausted = True

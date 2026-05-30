@@ -55,6 +55,7 @@ def test_left_thumb_extension_emits_jump(
     pipe = _pipeline(null_emitter)
     # handedness="Right" is swapped to left by swap_handedness=True
     left = make_hand_result(make_extended_landmarks(thumb_ext=1.5), "Right")
+    pipe.step([left])
     result = pipe.step([left])
     assert ("jump", "KEY_DOWN", "left") in [(e.gesture, e.action, e.hand) for e in result.events]
     assert ("key_down", "space") in null_emitter.log
@@ -74,6 +75,7 @@ def test_right_index_pinch_emits_attack_mouse(
     pipe = _pipeline(null_emitter)
     # handedness="Left" is swapped to right by swap_handedness=True
     right = make_hand_result(make_landmarks({"index": 0.20}), "Left")
+    pipe.step([right])
     pipe.step([right])
     assert ("key_down", "mouse_left") in null_emitter.log
 
@@ -200,6 +202,7 @@ def test_pulse_gesture_emits_key_tap(
     lm = make_extended_landmarks({"index": 1.3, "middle": 1.3})
     left = make_hand_result(lm, "Right")  # swapped to left
     pipe.step([left])
+    pipe.step([left])
     assert ("key_tap", "e") in null_emitter.log
 
 
@@ -219,6 +222,7 @@ def test_both_hands_concurrent_independent(
     left = make_hand_result(make_extended_landmarks(thumb_ext=1.5), "Right")  # → left
     right = make_hand_result(make_landmarks({"index": 0.20}), "Left")  # → right
     pipe.step([left, right])
+    pipe.step([left, right])
     assert ("key_down", "space") in null_emitter.log
     assert ("key_down", "mouse_left") in null_emitter.log
 
@@ -237,6 +241,7 @@ def test_tracking_loss_releases_held_keys(
     pipe = _pipeline(null_emitter)
     # Hold jump via thumb extension
     pipe.step([make_hand_result(make_extended_landmarks(thumb_ext=1.5), "Right")])
+    pipe.step([make_hand_result(make_extended_landmarks(thumb_ext=1.5), "Right")])
     pipe.step([])  # both hands gone -> jump released
     assert ("key_up", "space") in null_emitter.log
     assert null_emitter.held_keys == frozenset()
@@ -249,6 +254,7 @@ def test_shutdown_releases_everything(
 ) -> None:
     """Pipeline shutdown releases all held keys."""
     pipe = _pipeline(null_emitter)
+    pipe.step([make_hand_result(make_extended_landmarks(thumb_ext=1.5), "Right")])
     pipe.step([make_hand_result(make_extended_landmarks(thumb_ext=1.5), "Right")])
     assert "space" in null_emitter.held_keys
     pipe.shutdown()
@@ -334,3 +340,45 @@ def test_frame_buffer_keeps_latest_and_exhausts() -> None:
     assert latest is not None and int(latest[0, 0, 0]) == 30  # newest frame retained
     buf.stop()
     assert source.released is True
+
+
+class _ErrorFakeSource(FrameSource):
+    def __init__(self, frames: list[np.ndarray]) -> None:
+        self._frames = frames
+        self._i = 0
+        self.released = False
+
+    def read(self) -> np.ndarray | None:
+        if self._i == 2:
+            raise OSError("Transient read error")
+        if self._i >= len(self._frames):
+            return None
+        frame = self._frames[self._i]
+        self._i += 1
+        return frame
+
+    def release(self) -> None:
+        self.released = True
+
+    @property
+    def fps(self) -> float:
+        return 30.0
+
+
+def test_pipeline_shutdown_on_camera_error() -> None:
+    from minecraft_cv.pipeline import run_pipeline
+    from unittest.mock import patch
+    import pytest
+
+    frames = [np.full((4, 4, 3), v, dtype=np.uint8) for v in (10, 20)]
+    source = _ErrorFakeSource(frames)
+
+    settings = Settings()
+    settings.input.enabled = False
+
+    with patch("minecraft_cv.pipeline.Pipeline.shutdown") as mock_shutdown:
+        with pytest.raises(OSError, match="Transient read error"):
+            run_pipeline(settings, source=source)
+        
+        mock_shutdown.assert_called_once()
+        assert source.released is True

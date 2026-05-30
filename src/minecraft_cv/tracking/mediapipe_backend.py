@@ -8,6 +8,7 @@ landmarks, never this backend).
 
 from __future__ import annotations
 
+import os
 import ssl
 import time
 import urllib.request
@@ -15,6 +16,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+# Silence MediaPipe C++ glog warnings (e.g. NORM_RECT without IMAGE_DIMENSIONS)
+os.environ["GLOG_minloglevel"] = "2"
 
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
 

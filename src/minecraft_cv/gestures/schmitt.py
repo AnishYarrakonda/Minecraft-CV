@@ -47,6 +47,8 @@ class SchmittTrigger:
 
     t_engage: float
     t_release: float
+    engage_frames: int = 2
+    release_frames: int = 2
     state: PinchState = PinchState.RELEASED
 
     def __post_init__(self) -> None:
@@ -56,6 +58,8 @@ class SchmittTrigger:
                 f"t_engage ({self.t_engage}); equal/inverted thresholds reintroduce the "
                 "jitter chatter the Schmitt trigger exists to prevent (hard invariant #1)."
             )
+        self._consecutive_engage: int = 0
+        self._consecutive_release: int = 0
 
     def update(self, distance: float) -> str | None:
         """Feed one normalized distance; return a transition token on a state change.
@@ -66,12 +70,26 @@ class SchmittTrigger:
         Returns:
             ``KEY_DOWN`` on RELEASED->HOLDING, ``KEY_UP`` on HOLDING->RELEASED, else None.
         """
-        if self.state is PinchState.RELEASED and distance < self.t_engage:
-            self.state = PinchState.HOLDING
-            return KEY_DOWN
-        if self.state is PinchState.HOLDING and distance > self.t_release:
-            self.state = PinchState.RELEASED
-            return KEY_UP
+        if self.state is PinchState.RELEASED:
+            if distance < self.t_engage:
+                self._consecutive_engage += 1
+                if self._consecutive_engage >= self.engage_frames:
+                    self.state = PinchState.HOLDING
+                    self._consecutive_engage = 0
+                    self._consecutive_release = 0
+                    return KEY_DOWN
+            else:
+                self._consecutive_engage = 0
+        elif self.state is PinchState.HOLDING:
+            if distance > self.t_release:
+                self._consecutive_release += 1
+                if self._consecutive_release >= self.release_frames:
+                    self.state = PinchState.RELEASED
+                    self._consecutive_release = 0
+                    self._consecutive_engage = 0
+                    return KEY_UP
+            else:
+                self._consecutive_release = 0
         return None
 
     def reset(self) -> str | None:
@@ -81,6 +99,8 @@ class SchmittTrigger:
         (no bunny-hopping or sneak-lock). Idempotent: a no-op (returns None) if already
         RELEASED.
         """
+        self._consecutive_engage = 0
+        self._consecutive_release = 0
         if self.state is PinchState.HOLDING:
             self.state = PinchState.RELEASED
             return KEY_UP

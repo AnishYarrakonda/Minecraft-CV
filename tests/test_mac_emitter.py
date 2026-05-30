@@ -247,8 +247,10 @@ def test_pinch_sequence_drives_clean_down_up_no_stuck_key(emitter_and_recorder) 
 
     drive(0.5)   # released (above engage)
     drive(0.20)  # engage -> press
+    drive(0.20)  # engage -> press (debounce)
     drive(0.25)  # still in hysteresis band -> no change
     drive(0.5)   # release
+    drive(0.5)   # release (debounce)
     presses = [c for c in rec.mouse if c == ("press", "B.left")]
     releases = [c for c in rec.mouse if c == ("release", "B.left")]
     assert len(presses) == 1
@@ -269,6 +271,8 @@ def test_tracking_loss_reset_flushes_held_button(emitter_and_recorder) -> None: 
     for idx in (12, 16, 20):  # middle, ring, pinky -> far/released
         lm[idx] = lm[4] + np.array([0.2, 0.0, 0.0], dtype=np.float32)
     for _ in sm.update(lm):  # engage
+        em.key_down("mouse_left")
+    for _ in sm.update(lm):  # engage (debounce)
         em.key_down("mouse_left")
     assert em.held_keys == frozenset({"mouse_left"})
     # Tracking lost: the machine's reset emits KEY_UP, which the emitter must honor.

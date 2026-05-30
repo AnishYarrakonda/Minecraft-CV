@@ -114,7 +114,13 @@ class _GestureTrigger:
     t_engage: float
     t_release: float
     pulse: bool
+    engage_frames: int = 2
+    release_frames: int = 2
     state: _ExtensionState = _ExtensionState.RELEASED
+
+    def __post_init__(self) -> None:
+        self._consecutive_engage: int = 0
+        self._consecutive_release: int = 0
 
     def update(self, finger_state: FingerState) -> str | None:
         """Feed one frame of finger state; return a transition token on state change.
@@ -130,17 +136,31 @@ class _GestureTrigger:
 
         if self.state is _ExtensionState.RELEASED:
             if signal > self.t_engage and not excluded:
-                self.state = _ExtensionState.HOLDING
-                return KEY_DOWN
+                self._consecutive_engage += 1
+                if self._consecutive_engage >= self.engage_frames:
+                    self.state = _ExtensionState.HOLDING
+                    self._consecutive_engage = 0
+                    self._consecutive_release = 0
+                    return KEY_DOWN
+            else:
+                self._consecutive_engage = 0
         elif self.state is _ExtensionState.HOLDING:
             # Release if signal drops below release threshold OR exclusion fingers fire.
             if signal < self.t_release or excluded:
-                self.state = _ExtensionState.RELEASED
-                return KEY_UP
+                self._consecutive_release += 1
+                if self._consecutive_release >= self.release_frames:
+                    self.state = _ExtensionState.RELEASED
+                    self._consecutive_release = 0
+                    self._consecutive_engage = 0
+                    return KEY_UP
+            else:
+                self._consecutive_release = 0
         return None
 
     def reset(self) -> str | None:
         """Force to RELEASED, returning KEY_UP if was holding."""
+        self._consecutive_engage = 0
+        self._consecutive_release = 0
         if self.state is _ExtensionState.HOLDING:
             self.state = _ExtensionState.RELEASED
             return KEY_UP

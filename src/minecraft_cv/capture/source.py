@@ -100,8 +100,9 @@ class AVFoundationSource(FrameSource):
         cap = self._cv2.VideoCapture(index, self._cv2.CAP_AVFOUNDATION)
         if not cap.isOpened():
             raise RuntimeError(
-                f"Could not open camera index {index} (AVFoundation). Check the device index "
-                f"with enumerate_devices(); macOS may have assigned a Continuity Camera."
+                f"Could not open camera index {index} (AVFoundation). This could be an "
+                f"incorrect device index (check enumerate_devices()) or missing Camera "
+                f"permissions (check System Settings -> Privacy & Security -> Camera)."
             )
         # Newest-frame-wins + explicit format (defaults are often low-FPS/high-res).
         cap.set(self._cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -112,14 +113,32 @@ class AVFoundationSource(FrameSource):
         self._assert_not_blank()
 
     def _assert_not_blank(self) -> None:
-        ok, frame = self._cap.read()
-        if not ok or frame is None or float(np.asarray(frame).std()) < _BLANK_STD_THRESHOLD:
-            self.release()
-            raise PermissionError(
-                f"Camera index {self._index} opened but returned a blank/black frame. This is "
-                "almost always a missing Camera permission. Grant it in System Settings -> "
-                "Privacy & Security -> Camera to your terminal app, then restart it."
-            )
+        import sys
+        import time
+
+        # Some cameras need a few frames to warm up or auto-expose and may return blank/black
+        # frames initially. Try reading up to 100 frames before concluding permission is missing.
+        # This gives the user up to 5 seconds to approve the macOS camera permission prompt.
+        max_attempts = 100
+        for i in range(max_attempts):
+            ok, frame = self._cap.read()
+            if ok and frame is not None:
+                if float(np.asarray(frame).std()) >= _BLANK_STD_THRESHOLD:
+                    if i >= 10:
+                        print(" [done]", file=sys.stderr)
+                    return
+            if i == 10:
+                print(f"[mcv-run] Waiting for camera {self._index} to warm up or for macOS permission prompt...", end="", flush=True, file=sys.stderr)
+            time.sleep(0.05)  # give the sensor/driver a brief moment to warm up
+
+        if max_attempts > 10:
+            print(" [failed]", file=sys.stderr)
+        self.release()
+        raise PermissionError(
+            f"Camera index {self._index} opened but returned a blank/black frame. This is "
+            "almost always a missing Camera permission. Grant it in System Settings -> "
+            "Privacy & Security -> Camera to your terminal app, then restart it."
+        )
 
     def read(self) -> np.ndarray | None:
         ok, frame = self._cap.read()

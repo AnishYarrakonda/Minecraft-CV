@@ -34,6 +34,93 @@ def _load_settings(path: str, overrides: dict[str, Any] | None = None) -> Settin
     return Settings.load(config_path, overrides=overrides)
 
 
+# --- Unified Entrypoint -------------------------------------------------------
+def main(argv: list[str] | None = None) -> int:
+    """Unified entrypoint: mcv <command> [args...]"""
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print("Usage: mcv <command> [args...]")
+        print("\nCommands:")
+        print("  run        Run the live gesture controller")
+        print("  calibrate  Auto-calibrate spatial joysticks or pinch thresholds")
+        print("  analyze    Offline clip analysis")
+        print("  bench      Benchmark tracking backend latency")
+        print("  doctor     Check system permissions and config")
+        print("  gestures   Print the gesture reference card")
+        return 0
+
+    cmd = argv[0]
+    sub_argv = argv[1:]
+
+    if cmd == "run":
+        return main_run(sub_argv)
+    elif cmd == "calibrate":
+        return main_calibrate(sub_argv)
+    elif cmd == "analyze":
+        return main_analyze(sub_argv)
+    elif cmd == "bench":
+        return main_bench(sub_argv)
+    elif cmd == "doctor":
+        return main_doctor(sub_argv)
+    elif cmd == "gestures":
+        return main_gestures(sub_argv)
+    else:
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        return 1
+
+
+# --- mcv doctor ---------------------------------------------------------------
+def main_doctor(argv: list[str] | None = None) -> int:
+    """Check AVFoundation permission and print config."""
+    p = argparse.ArgumentParser(prog="mcv doctor", description="Check system permissions and config.")
+    _add_config_arg(p)
+    args = p.parse_args(argv)
+
+    import cv2
+
+    print("=== mcv doctor ===")
+    print("\n--- Camera Access (AVFoundation) ---")
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("[FAIL] Cannot open default camera. Check Terminal Camera permissions.")
+    else:
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            print("[FAIL] Camera opened but cannot read frames. Check permissions.")
+        else:
+            print("[PASS] Camera access OK.")
+        cap.release()
+
+    print("\n--- Configuration ---")
+    try:
+        settings = _load_settings(args.config)
+        print(settings.model_dump_json(indent=2))
+    except Exception as e:
+        print(f"[FAIL] Error loading config: {e}")
+
+    return 0
+
+
+# --- mcv gestures -------------------------------------------------------------
+def main_gestures(argv: list[str] | None = None) -> int:
+    """Print the gesture reference card."""
+    print("=== minecraft_cv Gesture Reference ===")
+    print("\n[Left Hand - Extension Gestures]")
+    print("  Thumb Out    -> Jump (Space)")
+    print("  Index Only   -> Sneak (Shift)")
+    print("  Middle Only  -> Sprint (Ctrl)")
+    print("  Peace Sign   -> Inventory (E) [Pulse]")
+    print("\n[Right Hand - Pinch Gestures]")
+    print("  Index Pinch  -> Attack/Mine (Left Click)")
+    print("  Middle Pinch -> Use/Place (Right Click)")
+    print("  Ring Pinch   -> Hotbar Scroll Up")
+    print("  Pinky Pinch  -> Hotbar Scroll Down")
+    print("\n[Both Hands - Inventory Mode]")
+    print("  Open both hands fully to toggle absolute-cursor inventory mode.")
+    return 0
+
+
 # --- mcv-run ------------------------------------------------------------------
 def main_run(argv: list[str] | None = None) -> int:
     """Run the live controller (camera or clip). Default emits NO input."""
@@ -485,4 +572,4 @@ def _pct(xs: list[float], p: float) -> float:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main_run())
+    raise SystemExit(main())

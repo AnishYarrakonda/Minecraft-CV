@@ -11,13 +11,14 @@ authors = [{ name = "anish" }]
 # deterministic gesture/joystick/config/pipeline test suite runs without a camera,
 # without MediaPipe, and without OS-input libraries installed.
 dependencies = [
-  "numpy>=1.25",
+  "numpy>=1.25,<3",
   "pydantic-settings>=2",
   "PyYAML>=6",
   "mediapipe>=0.10",
   "opencv-python>=4.8",
   "pynput>=1.7",
   "pyobjc-framework-Quartz>=10; sys_platform == 'darwin'",
+  "certifi",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +28,7 @@ torch = ["torch>=2.2"]
 test-min = ["numpy>=1.25", "pydantic-settings>=2", "PyYAML>=6", "pytest>=7"]
 
 [project.scripts]
+mcv = "minecraft_cv.cli:main"
 mcv-run = "minecraft_cv.cli:main_run"
 mcv-calibrate = "minecraft_cv.cli:main_calibrate"
 mcv-analyze = "minecraft_cv.cli:main_analyze"

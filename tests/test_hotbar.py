@@ -42,6 +42,7 @@ def test_ring_pinch_scrolls_up(
     emitter = NullEmitter()
     pipe = _pipe(emitter, _Clock())
     pipe.step([make_hand_result(make_landmarks({"ring": 0.20}), "Left")])
+    pipe.step([make_hand_result(make_landmarks({"ring": 0.20}), "Left")])
     assert ("scroll", "1") in emitter.log
 
 
@@ -51,6 +52,7 @@ def test_pinky_pinch_scrolls_down(
 ) -> None:
     emitter = NullEmitter()
     pipe = _pipe(emitter, _Clock())
+    pipe.step([make_hand_result(make_landmarks({"pinky": 0.20}), "Left")])
     pipe.step([make_hand_result(make_landmarks({"pinky": 0.20}), "Left")])
     assert ("scroll", "-1") in emitter.log
 
@@ -62,6 +64,7 @@ def test_hotbar_independent_of_attack(
     """Index (attack) + ring (hotbar) pinch simultaneously: both fire, no conflict."""
     emitter = NullEmitter()
     pipe = _pipe(emitter, _Clock())
+    pipe.step([make_hand_result(make_landmarks({"index": 0.20, "ring": 0.20}), "Left")])
     pipe.step([make_hand_result(make_landmarks({"index": 0.20, "ring": 0.20}), "Left")])
     assert ("key_down", "mouse_left") in emitter.log  # attack engaged
     assert ("scroll", "1") in emitter.log             # hotbar next fired
@@ -79,6 +82,7 @@ def test_held_hotbar_pinch_repeats_at_rate(
     pipe = _pipe(emitter, clock)
     held = make_hand_result(make_landmarks({"ring": 0.20}), "Left")
     clock.t = 0.0
+    pipe.step([held])  # frame 1
     pipe.step([held])  # engage -> 1 tick
     clock.t = 0.05
     pipe.step([held])  # < 1/8 s since last -> no repeat
@@ -96,6 +100,7 @@ def test_hotbar_release_stops_repeat(
     clock = _Clock()
     pipe = _pipe(emitter, clock)
     clock.t = 0.0
+    pipe.step([make_hand_result(make_landmarks({"ring": 0.20}), "Left")])  # frame 1
     pipe.step([make_hand_result(make_landmarks({"ring": 0.20}), "Left")])  # engage
     clock.t = 0.1
     pipe.step([make_hand_result(make_landmarks({"ring": 1.0}), "Left")])  # released

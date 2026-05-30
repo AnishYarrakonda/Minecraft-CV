@@ -74,7 +74,7 @@ def finger_extensions(landmarks: np.ndarray) -> FingerState:
     hand_scale = _dist(landmarks, WRIST, MIDDLE_MCP) or 1e-6
 
     # Thumb: lateral distance from thumb tip to index MCP, normalized by hand scale.
-    thumb = _dist(landmarks, THUMB_TIP, INDEX_MCP) / hand_scale
+    thumb = min(2.0, max(0.0, _dist(landmarks, THUMB_TIP, INDEX_MCP) / hand_scale))
 
     # For each finger: ratio of (wrist→tip distance) / (wrist→pip distance).
     # Extended finger: tip is farther from wrist than PIP → ratio > 1.

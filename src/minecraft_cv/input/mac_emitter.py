@@ -82,12 +82,15 @@ class MacInputEmitter(InputEmitter):
 
     # --- permission detection ----------------------------------------------
     def _check_permissions(self) -> None:
-        """Best-effort check that this process may emit synthetic input."""
+        """Best-effort check that this process may emit synthetic input. Prompts if missing."""
         trusted = True
         try:  # pragma: no cover - macOS-only, environment-dependent
-            from ApplicationServices import AXIsProcessTrusted
+            from ApplicationServices import AXIsProcessTrustedWithOptions
+            import CoreFoundation
 
-            trusted = bool(AXIsProcessTrusted())
+            key = CoreFoundation.CFSTR("AXTrustedCheckOptionPrompt")
+            options = {key: True}
+            trusted = bool(AXIsProcessTrustedWithOptions(options))
         except Exception:
             # Can't determine (framework missing); proceed rather than false-alarm.
             trusted = True

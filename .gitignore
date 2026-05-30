@@ -27,8 +27,5 @@ data/clips/*
 .idea/
 .vscode/
 
-# Poetry / pip lock artifacts kept, env not
-poetry.lock
-
-# critque
-/review_critique
+# .claude project data
+.claude/projects/
