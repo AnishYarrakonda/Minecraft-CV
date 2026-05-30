@@ -1,0 +1,127 @@
+"""OS-input emitter interface and the default no-op implementation.
+
+Hard invariant #2: the input emitter is a **no-op by default**. Tests and ``--no-input``
+dry-runs must never move the real mouse or press real keys. The real macOS implementation
+(:class:`~minecraft_cv.input.mac_emitter.MacInputEmitter`) is opt-in and imported lazily so
+that pynput / Quartz are never imported during tests.
+
+The ABC owns held-key bookkeeping (dedup + ``release_all``) so every backend shares the same
+safety semantics; subclasses implement only the four ``_emit_*`` primitives.
+
+Logical key names: keyboard keys are passed by name (``"space"``, ``"shift"``, ``"e"``,
+``"w"``); mouse buttons use the ``"mouse_left"`` / ``"mouse_right"`` prefix convention.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from minecraft_cv.config import Settings
+
+
+class InputEmitter(ABC):
+    """Abstract OS-input emitter with shared held-key tracking.
+
+    Concrete backends implement the ``_emit_*`` primitives. The public ``key_down`` /
+    ``key_up`` / ``release_all`` methods deduplicate presses and guarantee that every held
+    key is releasable in one call (used on shutdown / tracking loss / crash).
+    """
+
+    def __init__(self) -> None:
+        self._held_keys: set[str] = set()
+
+    # --- public API ---------------------------------------------------------
+    def key_down(self, key: str) -> None:
+        """Press ``key`` if not already held (idempotent; no auto-repeat spam)."""
+        if key in self._held_keys:
+            return
+        self._held_keys.add(key)
+        self._emit_key_down(key)
+
+    def key_up(self, key: str) -> None:
+        """Release ``key`` if currently held (no-op otherwise)."""
+        if key not in self._held_keys:
+            return
+        self._held_keys.discard(key)
+        self._emit_key_up(key)
+
+    def mouse_move(self, dx: float, dy: float) -> None:
+        """Emit a relative mouse-look delta in screen pixels (camera rotation)."""
+        self._emit_mouse_move(dx, dy)
+
+    def scroll(self, clicks: int) -> None:
+        """Emit ``clicks`` scroll ticks (positive = up = hotbar next)."""
+        if clicks:
+            self._emit_scroll(clicks)
+
+    def release_all(self) -> None:
+        """Release every currently-held key/button. The OS-level fail-safe backstop."""
+        for key in sorted(self._held_keys):
+            self._emit_key_up(key)
+        self._held_keys.clear()
+
+    @property
+    def held_keys(self) -> frozenset[str]:
+        """The set of keys/buttons currently held down."""
+        return frozenset(self._held_keys)
+
+    # --- primitives implemented by backends ---------------------------------
+    @abstractmethod
+    def _emit_key_down(self, key: str) -> None: ...
+
+    @abstractmethod
+    def _emit_key_up(self, key: str) -> None: ...
+
+    @abstractmethod
+    def _emit_mouse_move(self, dx: float, dy: float) -> None: ...
+
+    @abstractmethod
+    def _emit_scroll(self, clicks: int) -> None: ...
+
+
+class NullEmitter(InputEmitter):
+    """No-op emitter that records calls for assertions. Default for tests/dry-runs.
+
+    Every primitive appends to :attr:`log` and emits nothing to the OS. Held-key tracking
+    and ``release_all`` behave exactly as in a real backend, so dropout/shutdown safety can
+    be tested without touching the OS.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.log: list[tuple[str, ...]] = []
+
+    def _emit_key_down(self, key: str) -> None:
+        self.log.append(("key_down", key))
+
+    def _emit_key_up(self, key: str) -> None:
+        self.log.append(("key_up", key))
+
+    def _emit_mouse_move(self, dx: float, dy: float) -> None:
+        self.log.append(("mouse_move", f"{dx:.6f}", f"{dy:.6f}"))
+
+    def _emit_scroll(self, clicks: int) -> None:
+        self.log.append(("scroll", str(clicks)))
+
+
+def create_emitter(settings: Settings) -> InputEmitter:
+    """Factory: return a real emitter only when input is explicitly enabled.
+
+    Args:
+        settings: Loaded configuration. ``settings.input.enabled`` gates real emission.
+
+    Returns:
+        A :class:`NullEmitter` unless ``settings.input.enabled`` is True, in which case the
+        macOS :class:`MacInputEmitter` is imported lazily and returned.
+    """
+    if not settings.input.enabled:
+        return NullEmitter()
+    # Imported lazily so pynput / Quartz are never imported in tests or dry-runs.
+    from minecraft_cv.input.mac_emitter import MacInputEmitter
+
+    return MacInputEmitter(
+        mouse_delta_scale=settings.input.mouse_delta_scale,
+        key_repeat_guard_ms=settings.input.key_repeat_guard_ms,
+    )

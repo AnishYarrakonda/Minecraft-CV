@@ -75,6 +75,11 @@ bindings:
   attack: mouse_left
   use: mouse_right
   inventory: e
+  # Left-hand spatial-joystick translation -> WASD.
+  forward: w
+  back: s
+  left: a
+  right: d
 
 debug:
   overlay: false            # --debug-overlay overrides
