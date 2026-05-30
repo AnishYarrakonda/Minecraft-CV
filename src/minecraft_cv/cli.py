@@ -97,7 +97,10 @@ def main_calibrate(argv: list[str] | None = None) -> int:
         ClipSource(args.clip)
         if args.clip
         else AVFoundationSource(
-            settings.camera.index, settings.camera.width, settings.camera.height, settings.camera.fps
+            settings.camera.index,
+            settings.camera.width,
+            settings.camera.height,
+            settings.camera.fps,
         )
     )
     tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)

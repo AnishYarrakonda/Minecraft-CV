@@ -20,7 +20,7 @@ import numpy as np
 
 from minecraft_cv.gestures.pinch import KEY_DOWN, GestureEvent, PinchStateMachine
 from minecraft_cv.gestures.safety import TrackingLossGuard
-from minecraft_cv.input.emitter import InputEmitter, NullEmitter, create_emitter
+from minecraft_cv.input.emitter import InputEmitter, create_emitter
 from minecraft_cv.joystick.deadzone import DeadzoneJoystick, anchor_xy
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
 
@@ -87,8 +87,12 @@ class Pipeline:
         right_sm = PinchStateMachine("right", settings.gestures.right_hand)
         guard = TrackingLossGuard(left_sm, right_sm)
         j = settings.joystick
-        left_joy = DeadzoneJoystick(j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output)
-        right_joy = DeadzoneJoystick(j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output)
+        left_joy = DeadzoneJoystick(
+            j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output
+        )
+        right_joy = DeadzoneJoystick(
+            j.deadzone_radius, j.sensitivity, j.accel_exponent, j.max_output
+        )
         return cls(
             emitter=emitter if emitter is not None else create_emitter(settings),
             guard=guard,

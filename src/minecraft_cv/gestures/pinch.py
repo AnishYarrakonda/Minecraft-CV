@@ -41,13 +41,16 @@ class ThresholdSpec(Protocol):
     """
 
     @property
-    def finger(self) -> str: ...
+    def finger(self) -> str:
+        """Fingertip name this gesture pinches against."""
 
     @property
-    def t_engage(self) -> float: ...
+    def t_engage(self) -> float:
+        """Normalized distance below which the gesture engages."""
 
     @property
-    def t_release(self) -> float: ...
+    def t_release(self) -> float:
+        """Normalized distance above which the gesture releases."""
 
 
 @dataclass(frozen=True)

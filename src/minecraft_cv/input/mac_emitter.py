@@ -21,8 +21,7 @@ from typing import Any
 
 from minecraft_cv.input.emitter import InputEmitter
 
-# Keyboard key names that map to pynput special keys rather than single characters.
-_SPECIAL_KEYS = ("space", "shift", "ctrl", "alt", "cmd", "enter", "tab", "esc")
+# Logical names that map to mouse buttons rather than keyboard keys.
 _MOUSE_BUTTONS = ("mouse_left", "mouse_right", "mouse_middle")
 
 
