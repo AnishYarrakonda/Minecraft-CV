@@ -191,6 +191,35 @@ def _build_palm_normal_landmarks(
     return lm + np.asarray(offset, dtype=np.float32)
 
 
+def _build_tilt_landmarks(
+    tilt: tuple[float, float] = (0.0, 0.0),
+    depth: float = 1.0,
+    scale: float = 0.2,
+    offset: tuple[float, float, float] = (0.4, 0.4, 0.0),
+    fingertip: tuple[float, float, float] = (0.05, 0.05, 0.0),
+) -> np.ndarray:
+    """Build landmarks whose wrist->MCP-centroid vector has a controllable image ``(x, y)``.
+
+    The palm MCPs (5, 9, 17) are placed so their centroid equals ``(tx, ty, depth) * scale``
+    and the hand span (``|lm9 - wrist|``) equals its magnitude, so ``palm_tilt_xy`` returns
+    exactly ``(tx, ty) / sqrt(tx^2 + ty^2 + depth^2)`` — sign- and order-preserving in ``tx``
+    and ``ty`` (tilt right -> +x, tilt left -> -x; never collapsed). Fingertips (4, 8, 12, 16,
+    20) are placed at ``fingertip`` and never affect the tilt signal, so varying them models
+    finger curl / pinch.
+    """
+    tx, ty = tilt
+    lm = np.zeros((21, 3), dtype=np.float32)
+    center = np.asarray([tx, ty, depth], dtype=np.float32) * scale
+    across = np.asarray([0.25 * scale, 0.0, 0.0], dtype=np.float32)
+    lm[0] = (0.0, 0.0, 0.0)  # WRIST
+    lm[9] = center  # MIDDLE_MCP
+    lm[5] = center - across  # INDEX_MCP (mean of 5,9,17 stays exactly `center`)
+    lm[17] = center + across  # PINKY_MCP
+    for idx in (4, 8, 12, 16, 20):
+        lm[idx] = np.asarray(fingertip, dtype=np.float32)
+    return lm + np.asarray(offset, dtype=np.float32)
+
+
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     out = dict(base)
     for key, value in override.items():
@@ -207,6 +236,23 @@ def make_calibrated_settings(**overrides: Any) -> Settings:
         "joystick": {
             "mode": "palm_normal",
             "palm_normal": {
+                "left_neutral": (0.0, 0.0),
+                "right_neutral": (0.0, 0.0),
+                "deadzone": 0.05,
+                "left_sensitivity": (2.0, 2.0),
+                "right_sensitivity": (2.0, 2.0),
+            },
+        }
+    }
+    return Settings(**_deep_merge(base, overrides))
+
+
+def make_tilt_calibrated_settings(**overrides: Any) -> Settings:
+    """Settings with knuckle-tilt (``palm_tilt``) calibration filled in for pipeline tests."""
+    base: dict[str, Any] = {
+        "joystick": {
+            "mode": "palm_tilt",
+            "tilt": {
                 "left_neutral": (0.0, 0.0),
                 "right_neutral": (0.0, 0.0),
                 "deadzone": 0.05,
@@ -240,6 +286,12 @@ def make_wrist_rotation_landmarks() -> Callable[..., np.ndarray]:
 def make_palm_normal_landmarks() -> Callable[..., np.ndarray]:
     """Return a builder for palm-normal joystick tests."""
     return _build_palm_normal_landmarks
+
+
+@pytest.fixture
+def make_tilt_landmarks() -> Callable[..., np.ndarray]:
+    """Return a builder for knuckle-tilt joystick tests."""
+    return _build_tilt_landmarks
 
 
 @pytest.fixture

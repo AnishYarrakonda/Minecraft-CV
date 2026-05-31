@@ -16,15 +16,30 @@ They share the same landmark stream but are completely independent state machine
 
 ## Spatial joysticks
 
-Two joystick modes exist. **`palm_normal` is the default** for gameplay; `wrist_rotation` is
-the legacy fallback.
+Three joystick modes exist. **`palm_tilt` is the default** for gameplay; `palm_normal` and
+`wrist_rotation` are legacy fallbacks.
 
-### palm_normal (default)
+### palm_tilt (default)
 
-Uses the **palm-plane normal vector** as the joystick signal. A calibration step (`mcv calibrate
---apply`) stores each hand's resting normal; gameplay measures deviation from that neutral in
-`(x, y)` normal space. This is translation-invariant — moving closer to the camera or shifting
-in the chair doesn't drift the neutral.
+Uses the **image-plane knuckle-tilt vector** as the joystick signal: the wrist→MCP-centroid
+direction (`palm_tilt_xy`, the `(x, y)` of `palm_vector`), normalized by hand span. Tilting a
+resting hand at the wrist swings the knuckles across the frame — a large, sign-stable 2D
+signal. A calibration step (`mcv calibrate --apply`) stores each hand's resting tilt in the
+`joystick.tilt` block; gameplay measures deviation from that neutral. It is translation-
+invariant (a difference of two landmarks), scale-invariant, and immune to finger curl/pinch
+(MCP-based). It deliberately replaces `palm_normal`, whose `(x, y)` projection was near-zero
+and noise-dominated in the resting range and collapsed left-tilt and right-tilt together.
+
+The same calibrated tilt signal also drives the **inventory cursor** as a tilt-to-absolute
+pointer (`Pipeline._update_cursor`): tilt deviation × per-axis sensitivity maps about
+screen-center, so a resting hand sits at center and a full comfortable tilt spans the screen.
+
+### palm_normal (legacy)
+
+Uses the **palm-plane normal vector** as the joystick signal. A calibration step stores each
+hand's resting normal in `joystick.palm_normal`; gameplay measures deviation from that neutral
+in `(x, y)` normal space. Translation-invariant, but unreliable for left/right tilt — kept only
+as a selectable fallback (`joystick.mode: palm_normal`).
 
 ### wrist_rotation (legacy)
 

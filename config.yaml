@@ -98,7 +98,21 @@ gestures:
       - hotbar_next
       - hotbar_prev
 joystick:
-  mode: palm_normal
+  mode: palm_tilt
+  tilt:
+    left_neutral:
+    - 0.03541
+    - -0.82044
+    right_neutral:
+    - 0.0599
+    - -0.83227
+    deadzone: 0.0689
+    left_sensitivity:
+    - 4.36496
+    - 14.37098
+    right_sensitivity:
+    - 9.87439
+    - 6.48783
   palm_normal:
     left_neutral:
     - -0.2789
@@ -161,6 +175,6 @@ bindings:
   left: a
   right: d
 debug:
-  overlay: false
+  overlay: true
   log_level: WARNING
   overlay_every: 1

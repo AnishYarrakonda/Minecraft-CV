@@ -167,17 +167,20 @@ def main_run(argv: list[str] | None = None) -> int:
         flush=True,
     )
     try:
-        palm_normal_missing = (
-            settings.joystick.mode == "palm_normal"
-            and (
-                settings.joystick.palm_normal.left_neutral is None
-                or settings.joystick.palm_normal.right_neutral is None
-            )
+        jm = settings.joystick.mode
+        if jm == "palm_tilt":
+            block = settings.joystick.tilt
+        elif jm == "palm_normal":
+            block = settings.joystick.palm_normal
+        else:
+            block = None
+        calibration_missing = block is not None and (
+            block.left_neutral is None or block.right_neutral is None
         )
-        allow_uncalibrated_preview = palm_normal_missing and not settings.input.enabled
+        allow_uncalibrated_preview = calibration_missing and not settings.input.enabled
         if allow_uncalibrated_preview:
             print(
-                "[mcv-run] warning: palm-normal calibration is missing; dry-run will use "
+                f"[mcv-run] warning: {jm} calibration is missing; dry-run will use "
                 "temporary first-visible-hand neutrals. Run `mcv calibrate --apply` before "
                 "`mcv run --input`.",
                 file=sys.stderr,
@@ -200,9 +203,9 @@ def main_run(argv: list[str] | None = None) -> int:
 def main_calibrate(argv: list[str] | None = None) -> int:
     """Guided spatial-joystick calibration wizard.
 
-    In palm-normal mode, walks the user through neutral plus comfortable palm-normal tilts
-    and writes the required calibrated neutral/gain values. ``--mode anchor`` keeps the legacy
-    anchor-position calibration.
+    In the default palm-tilt mode (and legacy palm-normal), walks the user through a resting
+    neutral plus comfortable up/down/left/right wrist tilts and writes the calibrated
+    neutral/gain values. ``--mode anchor`` keeps the legacy anchor-position calibration.
 
     ``--pinch`` keeps the legacy live thumb-to-fingertip distance readout for Schmitt tuning.
     """
@@ -215,7 +218,7 @@ def main_calibrate(argv: list[str] | None = None) -> int:
                    help="MediaPipe handedness label to sample (default: Right)")
     p.add_argument("--anchor", choices=["wrist", "middle_mcp"], default=None,
                    help="anchor landmark (default: from config)")
-    p.add_argument("--mode", choices=["palm-normal", "anchor"], default=None,
+    p.add_argument("--mode", choices=["palm-tilt", "palm-normal", "anchor"], default=None,
                    help="calibration mode (default: from joystick.mode)")
     p.add_argument("--frames-per-step", type=int, default=60,
                    help="samples to collect per pose (default: 60)")
@@ -232,14 +235,30 @@ def main_calibrate(argv: list[str] | None = None) -> int:
 
     if args.pinch:
         return _calibrate_pinch(args, settings)
-    mode = args.mode or ("palm-normal" if settings.joystick.mode == "palm_normal" else "anchor")
-    if mode == "palm-normal":
-        return _calibrate_palm_normals(args, settings)
+    mode = args.mode
+    if mode is None:
+        if settings.joystick.mode == "palm_normal":
+            mode = "palm-normal"
+        elif settings.joystick.mode == "wrist_rotation":
+            mode = "anchor"
+        else:
+            mode = "palm-tilt"
+    if mode in ("palm-tilt", "palm-normal"):
+        return _calibrate_palm_normals(args, settings, tilt=(mode == "palm-tilt"))
     return _calibrate_joysticks(args, settings)
 
 
-def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int:
-    """Run the guided palm-normal wizard and optionally persist calibrated settings."""
+def _calibrate_palm_normals(
+    args: argparse.Namespace, settings: Settings, *, tilt: bool = False
+) -> int:
+    """Run the guided palm-tilt / palm-normal wizard and optionally persist settings.
+
+    Args:
+        args: Parsed ``mcv-calibrate`` CLI arguments.
+        settings: Loaded configuration.
+        tilt: When True, sample the knuckle-tilt signal and write the ``palm_tilt`` mode +
+            ``tilt`` block. When False, the legacy palm-normal signal + ``palm_normal`` block.
+    """
     import cv2
 
     from minecraft_cv.calibration import (
@@ -247,6 +266,7 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
         compute_palm_normal_calibration,
         load_config_data,
         merge_palm_normal_calibration,
+        merge_tilt_calibration,
         save_config_data,
     )
     from minecraft_cv.capture.source import AVFoundationSource, ClipSource
@@ -267,17 +287,22 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
         print(f"[mcv-calibrate] error: {exc}", file=sys.stderr)
         return 1
 
+    label = "knuckle-tilt" if tilt else "palm-normal"
+    reach_hint = (
+        "Tilt BOTH hands {dir} (pivot at the wrist, forearms resting) to a comfortable reach."
+        if tilt
+        else "Tilt BOTH palm normals {dir} to a comfortable full reach."
+    )
     steps: list[tuple[str, str]] = [("neutral", "Hold BOTH hands in your resting pose.")]
     if not args.quick_neutral:
         steps.extend(
-            (pose, f"Tilt BOTH palm normals {pose.upper()} to a comfortable full reach.")
-            for pose in PALM_NORMAL_POSES
+            (pose, reach_hint.format(dir=pose.upper())) for pose in PALM_NORMAL_POSES
         )
     collected: dict[str, dict[str, list[np.ndarray]]] = {
         "left": {},
         "right": {},
     }
-    print("=== mcv-calibrate: palm-normal joystick wizard ===")
+    print(f"=== mcv-calibrate: {label} joystick wizard ===")
     print(f"  hands=both  frames/step={args.frames_per_step}")
     try:
         for name, instruction in steps:
@@ -293,6 +318,7 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
                 settings.camera.mirror,
                 settings.tracking.swap_handedness,
                 cv2,
+                tilt=tilt,
             )
             for hand in ("left", "right"):
                 collected[hand][name] = samples[hand]
@@ -306,9 +332,10 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
     finally:
         source.release()
         tracker.close()
+        cv2.destroyAllWindows()
 
     if args.quick_neutral:
-        return _save_quick_palm_normal_calibration(args, settings, collected)
+        return _save_quick_palm_normal_calibration(args, settings, collected, tilt=tilt)
 
     try:
         result = compute_palm_normal_calibration(
@@ -319,7 +346,9 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
         print(f"[mcv-calibrate] error: {exc} (were both hands visible?)", file=sys.stderr)
         return 1
 
-    overrides = result.joystick_overrides()["palm_normal"]
+    block = "tilt" if tilt else "palm_normal"
+    mode_name = "palm_tilt" if tilt else "palm_normal"
+    overrides = result.joystick_overrides(mode=mode_name, block=block)[block]
     print("\n=== Result ===")
     print(f"  left neutral        = {overrides['left_neutral']}")
     print(f"  right neutral       = {overrides['right_neutral']}")
@@ -341,7 +370,12 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
             file=sys.stderr,
         )
         return 1
-    merged = merge_palm_normal_calibration(load_config_data(config_path), result)
+    existing = load_config_data(config_path)
+    merged = (
+        merge_tilt_calibration(existing, result)
+        if tilt
+        else merge_palm_normal_calibration(existing, result)
+    )
     try:
         Settings(**merged)
     except Exception as exc:  # noqa: BLE001 - surface any validation failure to the user
@@ -349,7 +383,7 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
               file=sys.stderr)
         return 1
     save_config_data(config_path, merged)
-    print(f"[mcv-calibrate] wrote palm-normal calibration to {config_path}.")
+    print(f"[mcv-calibrate] wrote {label} calibration to {config_path}.")
     return 0
 
 
@@ -357,10 +391,17 @@ def _save_quick_palm_normal_calibration(
     args: argparse.Namespace,
     settings: Settings,
     collected: dict[str, dict[str, list[np.ndarray]]],
+    *,
+    tilt: bool = False,
 ) -> int:
-    """Persist a one-pose palm-normal calibration using existing gains/deadzone."""
+    """Persist a one-pose calibration using existing gains/deadzone.
+
+    ``tilt=True`` writes the ``palm_tilt`` mode + ``tilt`` block; otherwise ``palm_normal``.
+    """
     from minecraft_cv.calibration import load_config_data, save_config_data
 
+    block_key = "tilt" if tilt else "palm_normal"
+    mode_name = "palm_tilt" if tilt else "palm_normal"
     left_samples = np.asarray(collected["left"].get("neutral", []), dtype=np.float64).reshape(
         -1, 2
     )
@@ -376,7 +417,7 @@ def _save_quick_palm_normal_calibration(
 
     left_neutral = [round(float(v), 5) for v in np.mean(left_samples, axis=0)]
     right_neutral = [round(float(v), 5) for v in np.mean(right_samples, axis=0)]
-    palm = settings.joystick.palm_normal
+    palm = settings.joystick.tilt if tilt else settings.joystick.palm_normal
     print("\n=== Quick Neutral Result ===")
     print(f"  left neutral        = {left_neutral}")
     print(f"  right neutral       = {right_neutral}")
@@ -400,8 +441,8 @@ def _save_quick_palm_normal_calibration(
         return 1
     merged = load_config_data(config_path)
     joystick = dict(merged.get("joystick") or {})
-    palm_normal = dict(joystick.get("palm_normal") or {})
-    palm_normal.update(
+    block = dict(joystick.get(block_key) or {})
+    block.update(
         {
             "left_neutral": left_neutral,
             "right_neutral": right_neutral,
@@ -410,8 +451,8 @@ def _save_quick_palm_normal_calibration(
             "right_sensitivity": list(palm.right_sensitivity),
         }
     )
-    joystick["mode"] = "palm_normal"
-    joystick["palm_normal"] = palm_normal
+    joystick["mode"] = mode_name
+    joystick[block_key] = block
     merged["joystick"] = joystick
     try:
         Settings(**merged)
@@ -420,7 +461,7 @@ def _save_quick_palm_normal_calibration(
               file=sys.stderr)
         return 1
     save_config_data(config_path, merged)
-    print(f"[mcv-calibrate] wrote quick palm-normal calibration to {config_path}.")
+    print(f"[mcv-calibrate] wrote quick {mode_name} calibration to {config_path}.")
     return 0
 
 
@@ -480,6 +521,7 @@ def _calibrate_joysticks(args: argparse.Namespace, settings: Settings) -> int:
     finally:
         source.release()
         tracker.close()
+        cv2.destroyAllWindows()
 
     neutral = collected.pop("neutral", [])
     try:
@@ -537,10 +579,22 @@ def _collect_anchor_samples(
         if mirror:
             frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        for h in tracker.detect(rgb):
+        results = tracker.detect(rgb)
+        for h in results:
             if h.handedness == hand:
                 out.append(anchor_xy(h.landmarks, anchor))
                 break
+        fh, fw = frame.shape[:2]
+        for hand_result in results:
+            for x, y, _ in hand_result.landmarks:
+                cv2.circle(frame, (int(x * fw), int(y * fh)), 3, (0, 255, 0), -1)
+        cv2.putText(
+            frame,
+            f"samples: {len(out)}/{n_frames}",
+            (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1,
+        )
+        cv2.imshow("minecraft_cv calibrate", frame)
+        cv2.waitKey(1)
     return out
 
 
@@ -551,9 +605,18 @@ def _collect_palm_normal_samples(
     mirror: bool,
     swap_handedness: bool,
     cv2: Any,
+    *,
+    tilt: bool = False,
 ) -> dict[str, list[np.ndarray]]:
-    """Collect palm-normal ``(x, y)`` samples for both logical hands."""
-    from minecraft_cv.joystick.palm_normal import palm_normal_xy
+    """Collect joystick-signal ``(x, y)`` samples for both logical hands.
+
+    ``tilt=True`` samples the knuckle-tilt signal (``palm_tilt_xy``); otherwise the legacy
+    palm-normal signal (``palm_normal_xy``).
+    """
+    if tilt:
+        from minecraft_cv.joystick.palm_tilt import palm_tilt_xy as signal_fn
+    else:
+        from minecraft_cv.joystick.palm_normal import palm_normal_xy as signal_fn
 
     out: dict[str, list[np.ndarray]] = {"left": [], "right": []}
     while len(out["left"]) < n_frames or len(out["right"]) < n_frames:
@@ -563,13 +626,25 @@ def _collect_palm_normal_samples(
         if mirror:
             frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        for h in tracker.detect(rgb):
+        results = tracker.detect(rgb)
+        for h in results:
             label = h.handedness
             if swap_handedness:
                 label = "Right" if label == "Left" else "Left"
             key = label.lower()
             if key in out and len(out[key]) < n_frames:
-                out[key].append(palm_normal_xy(h.landmarks))
+                out[key].append(signal_fn(h.landmarks))
+        fh, fw = frame.shape[:2]
+        for hand_result in results:
+            for x, y, _ in hand_result.landmarks:
+                cv2.circle(frame, (int(x * fw), int(y * fh)), 3, (0, 255, 0), -1)
+        cv2.putText(
+            frame,
+            f"L:{len(out['left'])}/{n_frames}  R:{len(out['right'])}/{n_frames}",
+            (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1,
+        )
+        cv2.imshow("minecraft_cv calibrate", frame)
+        cv2.waitKey(1)
     return out
 
 
@@ -592,13 +667,17 @@ def _calibrate_pinch(args: argparse.Namespace, settings: Settings) -> int:
     tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
     print("[mcv-calibrate] move your fingers; Ctrl-C to stop. Pick T_engage below the "
           "pinched distance and T_release above the open distance.")
+    mirror = settings.camera.mirror
     try:
         while True:
             frame = source.read()
             if frame is None:
                 break
+            if mirror:
+                frame = cv2.flip(frame, 1)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            for hand in tracker.detect(rgb):
+            results = tracker.detect(rgb)
+            for hand in results:
                 if hand.handedness != args.hand:
                     continue
                 d = normalized_distances(hand.landmarks)
@@ -607,12 +686,19 @@ def _calibrate_pinch(args: argparse.Namespace, settings: Settings) -> int:
                     f"ring={d['ring']:.3f}  pinky={d['pinky']:.3f}",
                     end="\r",
                 )
+            fh, fw = frame.shape[:2]
+            for hand in results:
+                for x, y, _ in hand.landmarks:
+                    cv2.circle(frame, (int(x * fw), int(y * fh)), 3, (0, 255, 0), -1)
+            cv2.imshow("minecraft_cv calibrate", frame)
+            cv2.waitKey(1)
             time.sleep(0.02)
     except KeyboardInterrupt:
         print("\n[mcv-calibrate] done.")
     finally:
         source.release()
         tracker.close()
+        cv2.destroyAllWindows()
     return 0
 
 

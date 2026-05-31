@@ -23,7 +23,8 @@ def test_defaults_construct_without_yaml() -> None:
     s = Settings()
     assert s.camera.index == 0
     assert s.input.enabled is False  # NullEmitter by default (invariant #2)
-    assert s.joystick.mode == "palm_normal"
+    assert s.joystick.mode == "palm_tilt"
+    assert s.joystick.tilt.left_neutral is None
     assert s.joystick.palm_normal.left_neutral is None
     assert s.joystick.anchor == "wrist"
     assert s.joystick.cardinal_half_width == 35.0
@@ -49,7 +50,7 @@ def test_load_project_config_yaml() -> None:
     s = Settings.load(CONFIG_YAML)
     assert s.camera.fps == 30
     assert s.tracking.backend == "mediapipe"
-    assert s.joystick.mode == "palm_normal"
+    assert s.joystick.mode == "palm_tilt"
     assert s.gestures.left_hand["jump"].detector == "pinch"
     assert s.gestures.left_hand["sneak"].detector == "curl_combo"
     assert s.gestures.left_hand["sneak"].mode == "hold"

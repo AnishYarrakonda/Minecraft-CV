@@ -83,11 +83,18 @@ class PalmNormalCalibrationResult:
     left: PalmNormalHandCalibration
     right: PalmNormalHandCalibration
 
-    def joystick_overrides(self) -> dict[str, Any]:
-        """The ``joystick`` config subtree written by palm-normal calibration."""
+    def joystick_overrides(
+        self, *, mode: str = "palm_normal", block: str = "palm_normal"
+    ) -> dict[str, Any]:
+        """The ``joystick`` config subtree written by calibration.
+
+        The computed neutral/deadzone/sensitivity values are signal-agnostic, so the same
+        result serializes for either the ``palm_normal`` mode (``block="palm_normal"``) or the
+        ``palm_tilt`` mode (``mode="palm_tilt"``, ``block="tilt"``).
+        """
         return {
-            "mode": "palm_normal",
-            "palm_normal": {
+            "mode": mode,
+            block: {
                 "left_neutral": [round(v, 5) for v in self.left.neutral],
                 "right_neutral": [round(v, 5) for v in self.right.neutral],
                 "deadzone": round(max(self.left.deadzone, self.right.deadzone), 5),
@@ -255,19 +262,42 @@ def merge_calibration(existing: dict[str, Any], result: CalibrationResult) -> di
     return merged
 
 
+def _merge_calibration_block(
+    existing: dict[str, Any], overrides: dict[str, Any], block_key: str
+) -> dict[str, Any]:
+    """Deep-merge a single nested ``joystick.<block_key>`` override block into config data.
+
+    Every other section and key is preserved; only ``joystick.mode`` and the named block are
+    overwritten (the block itself is merged key-by-key so untouched fields survive).
+    """
+    merged = copy.deepcopy(existing)
+    joystick = dict(merged.get("joystick") or {})
+    block = dict(joystick.get(block_key) or {})
+    block.update(overrides[block_key])
+    joystick.update({k: v for k, v in overrides.items() if k != block_key})
+    joystick[block_key] = block
+    merged["joystick"] = joystick
+    return merged
+
+
 def merge_palm_normal_calibration(
     existing: dict[str, Any], result: PalmNormalCalibrationResult
 ) -> dict[str, Any]:
     """Return config data with calibrated palm-normal joystick values merged in."""
-    merged = copy.deepcopy(existing)
-    joystick = dict(merged.get("joystick") or {})
-    overrides = result.joystick_overrides()
-    palm_normal = dict(joystick.get("palm_normal") or {})
-    palm_normal.update(overrides["palm_normal"])
-    joystick.update({k: v for k, v in overrides.items() if k != "palm_normal"})
-    joystick["palm_normal"] = palm_normal
-    merged["joystick"] = joystick
-    return merged
+    return _merge_calibration_block(existing, result.joystick_overrides(), "palm_normal")
+
+
+def merge_tilt_calibration(
+    existing: dict[str, Any], result: PalmNormalCalibrationResult
+) -> dict[str, Any]:
+    """Return config data with calibrated knuckle-tilt joystick values merged in.
+
+    Writes ``joystick.mode: palm_tilt`` and the calibrated neutral/deadzone/sensitivity into
+    the ``joystick.tilt`` block, leaving any legacy ``palm_normal`` block untouched.
+    """
+    return _merge_calibration_block(
+        existing, result.joystick_overrides(mode="palm_tilt", block="tilt"), "tilt"
+    )
 
 
 def load_config_data(path: str | Path) -> dict[str, Any]:
@@ -302,5 +332,6 @@ __all__ = [
     "load_config_data",
     "merge_calibration",
     "merge_palm_normal_calibration",
+    "merge_tilt_calibration",
     "save_config_data",
 ]

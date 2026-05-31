@@ -24,7 +24,7 @@ CurlFingerName = Literal["index", "middle", "ring", "pinky"]
 GestureDetectorName = Literal["pinch", "curl_only", "curl_combo"]
 GestureMode = Literal["hold", "toggle"]
 Anchor = Literal["wrist", "middle_mcp"]
-JoystickMode = Literal["palm_normal", "wrist_rotation"]
+JoystickMode = Literal["palm_tilt", "palm_normal", "wrist_rotation"]
 ExtensionGestureType = Literal[
     "thumb_out", "index_only", "middle_only", "index_middle", "ring_only", "pinky_only"
 ]
@@ -310,16 +310,28 @@ class PalmNormalSettings(BaseModel):
     right_sensitivity: tuple[float, float] = (2.0, 2.0)
 
 
+class TiltSettings(PalmNormalSettings):
+    """Calibrated knuckle-tilt joystick parameters (the ``palm_tilt`` default mode).
+
+    Identical in shape to :class:`PalmNormalSettings` — a calibrated per-hand neutral, a
+    deadzone, and per-axis sensitivities — but the stored ``(x, y)`` neutral is the resting
+    *tilt* vector (wrist->MCP-centroid in the image plane), not a palm normal. Kept as a
+    separate block so the legacy ``palm_normal`` calibration can coexist and be switched to.
+    """
+
+
 class JoystickSettings(BaseModel):
     """Spatial-joystick mode, calibration, deadzone, and sensitivity parameters.
 
-    ``palm_normal`` is the default gameplay mode. The older ``wrist_rotation`` fields remain
-    available for experiments and for the legacy calibration path.
+    ``palm_tilt`` is the default gameplay mode (image-plane knuckle tilt). The older
+    ``palm_normal`` and ``wrist_rotation`` modes remain available for experiments and for the
+    legacy calibration path.
     """
 
     model_config = {"extra": "forbid"}
 
-    mode: JoystickMode = "palm_normal"
+    mode: JoystickMode = "palm_tilt"
+    tilt: TiltSettings = Field(default_factory=TiltSettings)
     palm_normal: PalmNormalSettings = Field(default_factory=PalmNormalSettings)
     deadzone_radius: float = Field(default=0.05, ge=0.0)
     sensitivity: float = Field(default=2.0, gt=0.0)

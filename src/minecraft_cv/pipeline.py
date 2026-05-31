@@ -27,6 +27,7 @@ from minecraft_cv.input.emitter import InputEmitter, create_emitter
 from minecraft_cv.joystick.deadzone import ANCHOR_INDEX, anchor_xy
 from minecraft_cv.joystick.one_euro import OneEuroFilter
 from minecraft_cv.joystick.palm_normal import PalmNormalJoystick, palm_normal_xy
+from minecraft_cv.joystick.palm_tilt import palm_tilt_xy
 from minecraft_cv.joystick.sprint_velocity import ENGAGE, RELEASE, SprintVelocityTrigger
 from minecraft_cv.joystick.wrist_rotation import WristRotationJoystick, palm_xz
 from minecraft_cv.recovery import HandRecovery, RecoveryDecision
@@ -67,6 +68,7 @@ class Pipeline:
         right_joystick: JoystickLike,
         bindings: dict[str, str],
         joystick_signal: Callable[[np.ndarray], np.ndarray] = palm_xz,
+        joystick_mode: str = "wrist_rotation",
         anchor: str = "wrist",
         recenter_grace_frames: int = 0,
         cardinal_half_width: float = 35.0,
@@ -91,6 +93,10 @@ class Pipeline:
             right_joystick: Right-hand joystick (-> relative mouse move).
             bindings: Map of gesture/direction name -> OS key name.
             joystick_signal: Landmark signal extractor passed into both joysticks.
+            joystick_mode: Active joystick mode (``palm_tilt``/``palm_normal``/
+                ``wrist_rotation``). In ``palm_tilt`` the inventory cursor is driven by the
+                calibrated tilt signal (absolute pointer); other modes use the legacy
+                anchor-position cursor.
             anchor: Legacy anchor selector used by velocity sprint and optional cursor mode.
             recenter_grace_frames: Consecutive missing-hand frames tolerated before a hand's
                 joystick neutral is recentered.
@@ -121,6 +127,7 @@ class Pipeline:
         self.right_joystick = right_joystick
         self.bindings = bindings
         self.joystick_signal = joystick_signal
+        self.joystick_mode = joystick_mode
         self.anchor = anchor
         self.recenter_grace_frames = recenter_grace_frames
         self.cardinal_half_width = cardinal_half_width
@@ -168,7 +175,23 @@ class Pipeline:
         joystick_signal: Callable[[np.ndarray], np.ndarray]
         left_joy: JoystickLike
         right_joy: JoystickLike
-        if j.mode == "palm_normal":
+        if j.mode == "palm_tilt":
+            t = j.tilt
+            missing_tilt_neutral = t.left_neutral is None or t.right_neutral is None
+            if missing_tilt_neutral and not allow_uncalibrated_palm_normal:
+                raise ValueError(
+                    "Palm-tilt joystick requires calibration before live input. Run "
+                    "`mcv calibrate --apply` to write left/right neutral tilt vectors, or use "
+                    "`mcv run --no-input --debug-overlay` for an uncalibrated preview."
+                )
+            left_joy = PalmNormalJoystick(
+                t.left_neutral, t.deadzone, t.left_sensitivity, j.max_output, j.smoothing
+            )
+            right_joy = PalmNormalJoystick(
+                t.right_neutral, t.deadzone, t.right_sensitivity, j.max_output, j.smoothing
+            )
+            joystick_signal = palm_tilt_xy
+        elif j.mode == "palm_normal":
             pn = j.palm_normal
             missing_palm_neutral = pn.left_neutral is None or pn.right_neutral is None
             if missing_palm_neutral and not allow_uncalibrated_palm_normal:
@@ -228,6 +251,7 @@ class Pipeline:
             right_joystick=right_joy,
             bindings=dict(settings.bindings),
             joystick_signal=joystick_signal,
+            joystick_mode=j.mode,
             anchor=j.anchor,
             recenter_grace_frames=j.recenter_grace_frames,
             cardinal_half_width=j.cardinal_half_width,
@@ -402,20 +426,34 @@ class Pipeline:
             self._sprint_active = False
 
     def _update_cursor(self, landmarks: np.ndarray | None) -> np.ndarray:
-        """Map the right-hand anchor to an absolute cursor position (inventory mode).
+        """Map the right hand to an absolute cursor position (inventory mode).
+
+        In ``palm_tilt`` mode the cursor is a *tilt-to-point* pointer: the calibrated tilt
+        deviation (signal minus the right hand's neutral, scaled by its per-axis sensitivity)
+        is mapped about screen-center, so a full comfortable tilt spans the screen and a
+        resting hand sits at center. This is precise from a still, resting hand — unlike the
+        legacy mapping below, which keys off raw hand *position* and is twitchy when the hand
+        barely moves. Other modes keep the legacy anchor-position mapping.
 
         Args:
             landmarks: ``(21, 3)`` right-hand landmarks, or ``None`` if absent this frame.
 
         Returns:
             The ``(2,)`` normalized screen position commanded this frame, or zeros if the hand
-            is absent. Frame of reference: normalized image coords (already mirrored upstream),
-            mapped about screen-center and scaled by ``cursor_gain``, clamped to ``[0, 1]``.
+            is absent. Frame of reference: normalized screen coords (``y`` down), clamped to
+            ``[0, 1]``.
         """
         if landmarks is None:
             return np.zeros(2, dtype=np.float64)
-        pos = anchor_xy(landmarks, self.anchor)
-        screen = 0.5 + (pos - 0.5) * self.cursor_gain
+        if self.joystick_mode == "palm_tilt":
+            signal = self.joystick_signal(landmarks)
+            neutral = self.right_joystick.neutral
+            sensitivity = self.right_joystick.sensitivity
+            norm_delta = np.clip((signal[:2] - neutral) * sensitivity, -1.0, 1.0)
+            screen = 0.5 + norm_delta * 0.5 * self.cursor_gain
+        else:
+            pos = anchor_xy(landmarks, self.anchor)
+            screen = 0.5 + (pos - 0.5) * self.cursor_gain
         screen = np.clip(screen, 0.0, 1.0)
         self.emitter.mouse_move_abs(float(screen[0]), float(screen[1]))
         return screen
@@ -585,7 +623,7 @@ def run_pipeline(
     buffer = FrameBuffer(source).start()
     res_w, res_h = settings.tracking.input_resolution
     mirror = settings.camera.mirror
-    overlay = settings.debug.overlay
+    overlay = True
     overlay_every = max(1, settings.debug.overlay_every)
     window = "minecraft_cv"
 

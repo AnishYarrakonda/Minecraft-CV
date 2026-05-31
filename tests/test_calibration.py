@@ -14,6 +14,7 @@ from minecraft_cv.calibration import (
     load_config_data,
     merge_calibration,
     merge_palm_normal_calibration,
+    merge_tilt_calibration,
     save_config_data,
 )
 from minecraft_cv.config import Settings
@@ -106,6 +107,26 @@ def test_palm_normal_merge_preserves_other_settings() -> None:
     assert merged["joystick"]["palm_normal"]["left_neutral"] == [0.0, 0.0]
     assert merged["joystick"]["smoothing"] == 0.6
     assert merged["camera"] == {"index": 2}
+
+
+def test_tilt_merge_writes_tilt_block_and_mode() -> None:
+    existing = {
+        "camera": {"index": 2},
+        "joystick": {"smoothing": 0.6, "palm_normal": {"left_neutral": [9.0, 9.0]}},
+    }
+    result = compute_palm_normal_calibration(_normal_samples())
+    merged = merge_tilt_calibration(existing, result)
+    assert merged["joystick"]["mode"] == "palm_tilt"
+    assert merged["joystick"]["tilt"]["left_neutral"] == [0.0, 0.0]
+    assert merged["joystick"]["tilt"]["right_sensitivity"][1] == pytest.approx(
+        1.0 / (0.3 - result.right.deadzone), rel=1e-4
+    )
+    # Other settings and the legacy palm_normal block are left untouched.
+    assert merged["joystick"]["smoothing"] == 0.6
+    assert merged["joystick"]["palm_normal"]["left_neutral"] == [9.0, 9.0]
+    assert merged["camera"] == {"index": 2}
+    # The merged config must validate (tilt is a real Settings field).
+    Settings(**merged)
 
 
 # --- persistence ------------------------------------------------------------

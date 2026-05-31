@@ -58,7 +58,7 @@ def test_uncalibrated_palm_normal_preview_auto_neutralizes_first_sample(
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     pipe = Pipeline.from_settings(
-        Settings(),
+        Settings(joystick={"mode": "palm_normal"}),
         emitter=null_emitter,
         allow_uncalibrated_palm_normal=True,
     )
