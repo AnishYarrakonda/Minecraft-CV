@@ -192,8 +192,8 @@ def compute_calibration(
 
     return CalibrationResult(
         neutral=(float(neutral[0]), float(neutral[1])),
-        deadzone_radius=float(deadzone),
-        sensitivity=float(sensitivity),
+        deadzone_radius=deadzone,
+        sensitivity=sensitivity,
         resting_jitter=jitter,
         mean_reach=mean_reach,
     )
@@ -254,7 +254,7 @@ def compute_palm_normal_hand_calibration(
 
     return PalmNormalHandCalibration(
         neutral=(float(neutral[0]), float(neutral[1])),
-        deadzone=float(deadzone),
+        deadzone=deadzone,
         sensitivity=(right_gain, forward_gain),
         sensitivity_neg=(left_gain, back_gain),
         resting_jitter=jitter,

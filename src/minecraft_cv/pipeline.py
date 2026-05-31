@@ -46,6 +46,10 @@ HandStatus = Literal["normal", "stabilizing", "absent"]
 class JoystickLike(Protocol):
     """Shared surface for palm-normal and legacy wrist-rotation joysticks."""
 
+    @property
+    def neutral(self) -> np.ndarray | None: ...
+    @property
+    def sensitivity(self) -> np.ndarray: ...
     def reset_neutral(self) -> None: ...
     def update(self, signal: np.ndarray) -> np.ndarray: ...
     def zero(self) -> np.ndarray: ...
@@ -165,17 +169,17 @@ class Pipeline:
         self.scroll_repeat_rate_hz = scroll_repeat_rate_hz
         self.look_filter = look_filter
         self.inventory_toggle = inventory_toggle
-        self.cursor_gain = float(cursor_gain)
+        self.cursor_gain = cursor_gain
         self.sprint_trigger = sprint_trigger
         self.left_recovery = left_recovery if left_recovery is not None else HandRecovery()
         self.right_recovery = right_recovery if right_recovery is not None else HandRecovery()
-        self.min_emit_confidence = float(min_emit_confidence)
+        self.min_emit_confidence = min_emit_confidence
         self._clock = clock
         self._wasd_held: set[str] = set()
         self._left_miss = 0
         self._right_miss = 0
         self._sprint_active = False
-        self._look_accel_exponent = float(look_accel_exponent)
+        self._look_accel_exponent = look_accel_exponent
         # Scroll repeat state: track last scroll time per direction for rate limiting.
         self._last_scroll_time: dict[str, float] = {}
 

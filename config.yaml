@@ -101,18 +101,24 @@ joystick:
   mode: palm_tilt
   tilt:
     left_neutral:
-    - 0.03541
-    - -0.82044
+    - 0.0797
+    - -0.8649
     right_neutral:
-    - 0.0599
-    - -0.83227
-    deadzone: 0.0689
+    - -0.06281
+    - -0.87518
+    deadzone: 0.05362
     left_sensitivity:
-    - 4.36496
-    - 14.37098
+    - 3.02231
+    - 1.27815
     right_sensitivity:
-    - 9.87439
-    - 6.48783
+    - 1.1126
+    - 2.16569
+    left_sensitivity_neg:
+    - 2.57104
+    - 22.79993
+    right_sensitivity_neg:
+    - 11.25705
+    - 18.65028
   palm_normal:
     left_neutral:
     - -0.2789

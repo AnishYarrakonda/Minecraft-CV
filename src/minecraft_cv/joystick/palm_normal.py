@@ -84,13 +84,13 @@ class PalmNormalJoystick:
         self._neutral = (
             None if self._configured_neutral is None else self._configured_neutral.copy()
         )
-        self.deadzone = float(deadzone)
+        self.deadzone = deadzone
         sens = np.asarray(sensitivity, dtype=np.float64)
         if sens.ndim == 0:
-            sens = np.asarray([float(sens), float(sens)], dtype=np.float64)
+            sens = np.asarray([sens.item(), sens.item()], dtype=np.float64)
         self.sensitivity = sens[:2].copy()
-        self.max_output = float(max_output)
-        self.smoothing = float(smoothing)
+        self.max_output = max_output
+        self.smoothing = smoothing
         self._filtered: np.ndarray | None = None
 
         # Asymmetric negative gain (None = symmetric, falls back to self.sensitivity)
@@ -99,7 +99,7 @@ class PalmNormalJoystick:
         else:
             sn = np.asarray(sensitivity_neg, dtype=np.float64)
             if sn.ndim == 0:
-                sn = np.asarray([float(sn), float(sn)], dtype=np.float64)
+                sn = np.asarray([sn.item(), sn.item()], dtype=np.float64)
             self.sensitivity_neg = sn[:2].copy()
 
     @property
