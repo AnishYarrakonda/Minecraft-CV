@@ -194,7 +194,7 @@ def test_project_config_yaml_loads_new_fields() -> None:
     s = Settings.load(CONFIG_YAML)
     assert s.joystick.smoothing == pytest.approx(0.4)
     assert s.joystick.right_smoothing == pytest.approx(0.6)
-    assert s.joystick.right_sensitivity == pytest.approx(80.0)
+    assert s.joystick.right_sensitivity == pytest.approx(40.0)
     assert s.joystick.look_accel_exponent == pytest.approx(1.25)
     assert s.joystick.one_euro_min_cutoff == pytest.approx(0.65)
     assert s.joystick.one_euro_beta == pytest.approx(0.035)

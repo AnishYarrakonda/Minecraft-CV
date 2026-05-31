@@ -135,7 +135,7 @@ class MainWindow(QMainWindow):
     def _on_worker_stopped(self) -> None:
         if self._thread is not None:
             self._thread.quit()
-            self._thread.wait(3000)
+            self._thread.wait()
             self._thread = None
         self._worker = None
         self._header.set_running(False)
@@ -172,7 +172,7 @@ class MainWindow(QMainWindow):
             self._worker.request_stop()
         if self._thread is not None:
             self._thread.quit()
-            self._thread.wait(3000)
+            self._thread.wait()
             self._thread = None
         self._worker = None
         super().closeEvent(event)  # type: ignore[arg-type]
