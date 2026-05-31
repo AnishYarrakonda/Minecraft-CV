@@ -52,21 +52,32 @@ def main() -> int:
     """Prompt for debug or real mode, then launch the existing CLI."""
     print("minecraft_cv launcher")
     real_input = yes_no("Run with real Minecraft keyboard/mouse input?", default=True)
+    show_overlay = yes_no("Show camera overlay?", default=True)
 
     if real_input:
         if palm_normal_calibration_missing():
-            print("\nPalm-normal calibration is missing, so live input cannot start yet.")
-            if yes_no("Run calibration now?", default=True):
-                code = cli_main(["calibrate", "--apply"])
+            print(
+                "\nPalm-normal calibration is missing, so live input cannot start yet."
+                "\nQuick setup only captures your resting hand pose and keeps the default "
+                "sensitivity."
+            )
+            if yes_no("Run quick setup now?", default=True):
+                code = cli_main(["calibrate", "--quick-neutral", "--apply"])
                 if code != 0:
                     return code
             else:
                 print("Cancelled. Use debug mode or run calibration before live input.")
                 return 1
-        return cli_main(["run", "--input"])
+        args = ["run", "--input"]
+        if show_overlay:
+            args.append("--debug-overlay")
+        return cli_main(args)
 
-    print("\nStarting debug overlay mode with no real input.")
-    return cli_main(["run", "--no-input", "--debug-overlay"])
+    print("\nStarting debug mode with no real input.")
+    args = ["run", "--no-input"]
+    if show_overlay:
+        args.append("--debug-overlay")
+    return cli_main(args)
 
 
 if __name__ == "__main__":

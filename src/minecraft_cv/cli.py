@@ -220,6 +220,11 @@ def main_calibrate(argv: list[str] | None = None) -> int:
     p.add_argument("--frames-per-step", type=int, default=60,
                    help="samples to collect per pose (default: 60)")
     p.add_argument("--apply", action="store_true", help="write the result back to config.yaml")
+    p.add_argument(
+        "--quick-neutral",
+        action="store_true",
+        help="palm-normal mode: capture only the resting pose and keep current gains",
+    )
     p.add_argument("--pinch", action="store_true",
                    help="legacy mode: print live thumb-to-fingertip distances instead")
     args = p.parse_args(argv)
@@ -262,13 +267,12 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
         print(f"[mcv-calibrate] error: {exc}", file=sys.stderr)
         return 1
 
-    steps: list[tuple[str, str]] = [
-        ("neutral", "Hold BOTH hands in your comfortable resting pose."),
-        *[
+    steps: list[tuple[str, str]] = [("neutral", "Hold BOTH hands in your resting pose.")]
+    if not args.quick_neutral:
+        steps.extend(
             (pose, f"Tilt BOTH palm normals {pose.upper()} to a comfortable full reach.")
             for pose in PALM_NORMAL_POSES
-        ],
-    ]
+        )
     collected: dict[str, dict[str, list[np.ndarray]]] = {
         "left": {},
         "right": {},
@@ -302,6 +306,9 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
     finally:
         source.release()
         tracker.close()
+
+    if args.quick_neutral:
+        return _save_quick_palm_normal_calibration(args, settings, collected)
 
     try:
         result = compute_palm_normal_calibration(
@@ -343,6 +350,77 @@ def _calibrate_palm_normals(args: argparse.Namespace, settings: Settings) -> int
         return 1
     save_config_data(config_path, merged)
     print(f"[mcv-calibrate] wrote palm-normal calibration to {config_path}.")
+    return 0
+
+
+def _save_quick_palm_normal_calibration(
+    args: argparse.Namespace,
+    settings: Settings,
+    collected: dict[str, dict[str, list[np.ndarray]]],
+) -> int:
+    """Persist a one-pose palm-normal calibration using existing gains/deadzone."""
+    from minecraft_cv.calibration import load_config_data, save_config_data
+
+    left_samples = np.asarray(collected["left"].get("neutral", []), dtype=np.float64).reshape(
+        -1, 2
+    )
+    right_samples = np.asarray(collected["right"].get("neutral", []), dtype=np.float64).reshape(
+        -1, 2
+    )
+    if len(left_samples) == 0 or len(right_samples) == 0:
+        print(
+            "[mcv-calibrate] error: quick neutral calibration needs both hands visible.",
+            file=sys.stderr,
+        )
+        return 1
+
+    left_neutral = [round(float(v), 5) for v in np.mean(left_samples, axis=0)]
+    right_neutral = [round(float(v), 5) for v in np.mean(right_samples, axis=0)]
+    palm = settings.joystick.palm_normal
+    print("\n=== Quick Neutral Result ===")
+    print(f"  left neutral        = {left_neutral}")
+    print(f"  right neutral       = {right_neutral}")
+    print(f"  deadzone            = {palm.deadzone} (kept)")
+    print(f"  left sensitivity    = {list(palm.left_sensitivity)} (kept)")
+    print(f"  right sensitivity   = {list(palm.right_sensitivity)} (kept)")
+
+    if not args.apply:
+        print(
+            "\n[mcv-calibrate] preview only. Re-run with --quick-neutral --apply to write "
+            f"to {args.config}."
+        )
+        return 0
+
+    config_path = args.config
+    if not Path(config_path).is_file():
+        print(
+            f"[mcv-calibrate] error: cannot apply; config '{config_path}' does not exist.",
+            file=sys.stderr,
+        )
+        return 1
+    merged = load_config_data(config_path)
+    joystick = dict(merged.get("joystick") or {})
+    palm_normal = dict(joystick.get("palm_normal") or {})
+    palm_normal.update(
+        {
+            "left_neutral": left_neutral,
+            "right_neutral": right_neutral,
+            "deadzone": palm.deadzone,
+            "left_sensitivity": list(palm.left_sensitivity),
+            "right_sensitivity": list(palm.right_sensitivity),
+        }
+    )
+    joystick["mode"] = "palm_normal"
+    joystick["palm_normal"] = palm_normal
+    merged["joystick"] = joystick
+    try:
+        Settings(**merged)
+    except Exception as exc:  # noqa: BLE001 - surface any validation failure to the user
+        print(f"[mcv-calibrate] error: computed config failed validation: {exc}",
+              file=sys.stderr)
+        return 1
+    save_config_data(config_path, merged)
+    print(f"[mcv-calibrate] wrote quick palm-normal calibration to {config_path}.")
     return 0
 
 

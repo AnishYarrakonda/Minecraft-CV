@@ -1,176 +1,166 @@
-# Default configuration for minecraft_cv.
-# All tunable values live here; gesture/joystick code must never hold magic numbers.
-# Loaded into a typed pydantic `Settings` model (see src/minecraft_cv/config.py).
-
 camera:
-  index: 0                  # Continuity Camera may steal index 0 -> a startup check warns
+  index: 0
   width: 640
   height: 480
   fps: 30
-  backend: avfoundation     # forced on macOS
-  mirror: true              # flip horizontally -> mirror view; also fixes MediaPipe handedness
-
+  backend: avfoundation
+  mirror: true
 tracking:
-  backend: mediapipe        # mediapipe | yolo
-  device: auto              # auto | mps | cuda | cpu  (mediapipe ignores this; CPU-only)
-  input_resolution: [256, 256]
+  backend: mediapipe
+  device: auto
+  input_resolution:
+  - 256
+  - 256
   min_detection_confidence: 0.5
   min_tracking_confidence: 0.5
   max_num_hands: 2
-  swap_handedness: true     # invert MediaPipe L/R labels to fix mirrored camera mapping
-  # Tracking-loss recovery (Task 5):
-  min_emit_confidence: 0.0  # drop hands below this handedness score (treated as absent); 0 = keep all
-  dropout_flush_ms: 100.0   # absence longer than this -> hard flush (recenter + release everything)
-  stabilization_ms: 500.0   # after a flush, suppress input this long while a new neutral re-seeds
-
+  swap_handedness: true
+  min_emit_confidence: 0.0
+  dropout_flush_ms: 100.0
+  stabilization_ms: 500.0
 gestures:
   left_hand:
-    # Pinches are holds. Ring+pinky curl holds Shift for sneak and suppresses ring/pinky
-    # pinches on the left hand while active.
-    jump:                   # thumb -> index
+    jump:
       detector: pinch
       finger: index
       mode: hold
-      t_engage: 0.30
+      t_engage: 0.3
       t_release: 0.45
-    inventory:              # thumb -> middle
+    inventory:
       detector: pinch
       finger: middle
       mode: hold
-      t_engage: 0.30
+      t_engage: 0.3
       t_release: 0.45
-    throw_item:             # thumb -> ring
+    throw_item:
       detector: pinch
       finger: ring
       mode: hold
-      t_engage: 0.30
+      t_engage: 0.3
       t_release: 0.45
-    switch_offhand:         # thumb -> pinky
+    switch_offhand:
       detector: pinch
       finger: pinky
       mode: hold
-      t_engage: 0.30
+      t_engage: 0.3
       t_release: 0.45
-    sneak:                  # ring + pinky curled -> hold Shift
+    sneak:
       detector: curl_combo
       finger: pinky
       mode: hold
       t_engage: 0.95
       t_release: 1.05
-      curl_fingers: [ring, pinky]
-      suppresses: [throw_item, switch_offhand]
+      curl_fingers:
+      - ring
+      - pinky
+      suppresses:
+      - throw_item
+      - switch_offhand
   right_hand:
-    # Pinch-based gestures plus ring+pinky curl for Sprint. Sprint suppresses hotbar pinches.
-    attack:                 # thumb -> index
+    attack:
       detector: pinch
       finger: index
       mode: hold
-      t_engage: 0.30
+      t_engage: 0.3
       t_release: 0.45
       conflict_group: primary_click
-    use:                    # thumb -> middle
+    use:
       detector: pinch
       finger: middle
       mode: hold
-      t_engage: 0.30
+      t_engage: 0.3
       t_release: 0.45
       conflict_group: primary_click
-    hotbar_next:            # thumb -> ring (scroll up)
+    hotbar_next:
       detector: pinch
       finger: ring
       mode: hold
-      t_engage: 0.30
+      t_engage: 0.3
       t_release: 0.45
       conflict_group: hotbar_scroll
-    hotbar_prev:            # thumb -> pinky (scroll down)
+    hotbar_prev:
       detector: pinch
       finger: pinky
       mode: hold
-      t_engage: 0.30
+      t_engage: 0.3
       t_release: 0.45
       conflict_group: hotbar_scroll
-    sprint:                 # ring + pinky curled -> hold Ctrl
+    sprint:
       detector: curl_combo
       finger: ring
       mode: hold
       t_engage: 0.95
       t_release: 1.05
-      curl_fingers: [ring, pinky]
-      suppresses: [hotbar_next, hotbar_prev]
-
+      curl_fingers:
+      - ring
+      - pinky
+      suppresses:
+      - hotbar_next
+      - hotbar_prev
 joystick:
-  mode: palm_normal         # palm_normal | wrist_rotation
+  mode: palm_normal
   palm_normal:
-    # Run `mcv calibrate --apply` before `mcv run`; runtime refuses null neutrals.
-    left_neutral: null      # calibrated palm-normal [x, y] for the physical left hand
-    right_neutral: null     # calibrated palm-normal [x, y] for the physical right hand
-    deadzone: 0.05          # per-axis neutral zone in palm-normal units
-    left_sensitivity: [2.0, 2.0]   # calibrated x/y gains for WASD
-    right_sensitivity: [2.0, 2.0]  # calibrated x/y gains for mouse look
-  deadzone_radius: 0.05     # legacy wrist_rotation per-axis neutral zone
-  sensitivity: 2.0          # legacy wrist_rotation linear gain
-  accel_exponent: 2.0       # legacy x/y joystick setting
-  anchor: wrist             # wrist (landmark 0) | middle_mcp (landmark 9)
-  max_output: 1.0           # output magnitude at saturation
-  smoothing: 0.6            # EMA on anchor position (0=none ->1=heavy); kills jitter/chatter
-  recenter_grace_frames: 3  # tolerate brief dropouts before recentering the neutral
-  cardinal_half_width: 35.0 # degrees; pure cardinal zone = ±35° from each axis direction
-  # Dynamic deadzone (V2): auto-size the deadzone from resting-hand jitter after (re)centering.
-  dynamic_deadzone: false       # off -> use the static deadzone_radius above
-  calibration_frames: 150       # resting samples (~5 s @30fps); output held at 0 during this
-  dynamic_deadzone_margin: 1.5  # effective radius = deadzone_radius + margin * resting jitter
-  # Mouse-look smoothing (V2): velocity-adaptive One-Euro filter on the right-hand look output.
-  look_filter: one_euro         # one_euro | ema (ema = joystick smoothing only)
-  one_euro_min_cutoff: 1.0      # Hz; lower = smoother at rest, more lag
-  one_euro_beta: 0.007          # higher = less lag on fast looks, more jitter
-  one_euro_d_cutoff: 1.0        # Hz; cutoff for the internal speed estimate
-
-# Inventory mode (legacy V2): disabled by default because open palm is now the neutral pose.
+    left_neutral:
+    - -0.2789
+    - -0.15363
+    right_neutral:
+    - 0.37115
+    - -0.14468
+    deadzone: 0.44679
+    left_sensitivity:
+    - 8.29951
+    - 1.73796
+    right_sensitivity:
+    - 1.95802
+    - 1.8916
+  deadzone_radius: 0.05
+  sensitivity: 2.0
+  accel_exponent: 2.0
+  anchor: wrist
+  max_output: 1.0
+  smoothing: 0.6
+  recenter_grace_frames: 3
+  cardinal_half_width: 35.0
+  dynamic_deadzone: false
+  calibration_frames: 150
+  dynamic_deadzone_margin: 1.5
+  look_filter: one_euro
+  one_euro_min_cutoff: 1.0
+  one_euro_beta: 0.007
+  one_euro_d_cutoff: 1.0
 inventory:
   enabled: false
-  open_threshold: 1.1           # finger extension ratio above which a finger counts as open
-  thumb_open_threshold: 0.9     # thumb lateral-extension ratio above which the thumb is open
-  hold_frames: 8                # consecutive both-open frames required before toggling
-  cooldown_frames: 20           # minimum frames between successive toggles
-  cursor_gain: 1.0              # normalized hand displacement -> normalized screen displacement
-
-# Sprint-via-velocity (Task 2): a quick forward push of the left hand toward the camera engages
-# Sprint (Ctrl held alongside W); it holds while the hand stays forward and releases on retreat.
-# Disabled by default because MediaPipe z is the least reliable landmark axis. Prefer the
-# right-hand ring+pinky curl sprint gesture unless you are experimenting with velocity sprint.
+  open_threshold: 1.1
+  thumb_open_threshold: 0.9
+  hold_frames: 8
+  cooldown_frames: 20
+  cursor_gain: 1.0
 sprint:
-  enabled: false            # off by default; the middle-finger extension sprint still works
-  v_sprint: 1.0             # forward-velocity threshold (normalized z units / second)
-  trigger_frames: 3         # consecutive above-threshold frames required to engage
-  release_margin: 0.02      # z hysteresis band: releases once the hand retreats this far back
-
+  enabled: false
+  v_sprint: 1.0
+  trigger_frames: 3
+  release_margin: 0.02
 input:
-  enabled: false            # NullEmitter unless explicitly enabled (--input overrides)
-  mouse_delta_scale: 15.0   # joystick units [0,1] -> CGEvent relative pixels for camera look
-  scroll_repeat_rate_hz: 8  # hotbar pulse re-emit rate while a pinch is held
-  key_repeat_guard_ms: 50   # minimum interval between repeated discrete events
-
-# gesture -> game key/button binding (loaded from config, never hardcoded in src/)
+  enabled: false
+  mouse_delta_scale: 15.0
+  scroll_repeat_rate_hz: 8
+  key_repeat_guard_ms: 50
 bindings:
-  # Left-hand discrete gestures.
   jump: space
   sneak: shift
   sprint: ctrl
   inventory: e
   throw_item: q
   switch_offhand: f
-  # Right-hand discrete gestures.
   attack: mouse_left
   use: mouse_right
   hotbar_next: scroll_up
   hotbar_prev: scroll_down
-  # Left-hand spatial-joystick translation -> WASD.
   forward: w
   back: s
   left: a
   right: d
-
 debug:
-  overlay: false            # --debug-overlay overrides
-  log_level: WARNING        # never INFO-per-frame; rate-limited debug counters only
-  overlay_every: 1          # draw the overlay every Nth frame (Task 4: decimate HighGUI cost)
+  overlay: false
+  log_level: WARNING
+  overlay_every: 1

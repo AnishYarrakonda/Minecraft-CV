@@ -25,6 +25,8 @@ Easy launcher:
 ```bash
 .venv/bin/python main.py
 ```
+Press `Enter` for the default `Y` answers. The launcher can run real input, show the
+camera overlay while playing, and do quick setup if palm-normal calibration is missing.
 
 Check if your camera and permissions are set up correctly:
 ```bash
@@ -36,14 +38,19 @@ Run in dry-run mode (does not emit OS input, shows camera overlay):
 .venv/bin/python -m minecraft_cv.cli run --no-input --debug-overlay
 ```
 
-Calibrate palm-normal controls before live gameplay:
+Quick one-pose setup before live gameplay:
+```bash
+.venv/bin/python -m minecraft_cv.cli calibrate --quick-neutral --apply
+```
+
+Full palm-normal calibration if you want tuned sensitivity:
 ```bash
 .venv/bin/python -m minecraft_cv.cli calibrate --apply
 ```
 
-Run in live mode (controls your mouse and keyboard):
+Run in live mode with the camera overlay while playing:
 ```bash
-.venv/bin/python -m minecraft_cv.cli run --input
+.venv/bin/python -m minecraft_cv.cli run --input --debug-overlay
 ```
 
 ## Gesture & Control Reference
@@ -51,7 +58,7 @@ Run in live mode (controls your mouse and keyboard):
 Here is how you control the game using gestures with your hands:
 
 ### 🎮 Calibrated Palm-Normal Thumbsticks
-Run `mcv calibrate --apply` before gameplay. Dry-run overlay can launch before calibration with temporary first-visible-hand neutrals, but `mcv run --input` refuses to start until calibrated neutral values exist in `config.yaml`.
+Run `.venv/bin/python -m minecraft_cv.cli calibrate --quick-neutral --apply` before gameplay for the easiest setup. Dry-run overlay can launch before calibration with temporary first-visible-hand neutrals, but `mcv run --input` refuses to start until neutral values exist in `config.yaml`.
 
 *   **Movement (WASD) - Left Hand**: Palm-normal tilt drives movement from calibrated rest.
     *   **Forward (`W`)**: Tilt the palm normal down.
