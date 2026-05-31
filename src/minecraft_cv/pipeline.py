@@ -19,17 +19,15 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 import numpy as np
 
-from minecraft_cv.gestures.inventory import InventoryModeToggle
 from minecraft_cv.gestures.pinch import KEY_DOWN
 from minecraft_cv.gestures.registry import GestureStateMachine
 from minecraft_cv.gestures.safety import AnyGestureEvent, TrackingLossGuard
 from minecraft_cv.input.emitter import InputEmitter, create_emitter
 from minecraft_cv.joystick.one_euro import OneEuroFilter
-from minecraft_cv.joystick.screen import ScreenJoystick, screen_mcp_centroid
-from minecraft_cv.joystick.sprint_velocity import ENGAGE, RELEASE, SprintVelocityTrigger
-from minecraft_cv.joystick.steering import accel_curve, octant_keys
+from minecraft_cv.joystick.screen import ScreenJoystick, screen_mcp_centroid, screen_thumb_tip
+from minecraft_cv.joystick.steering import octant_keys
 from minecraft_cv.recovery import HandRecovery, RecoveryDecision
-from minecraft_cv.tracking.tracker import HandResult, HandTracker
+from minecraft_cv.tracking.tracker import HandResult
 
 if TYPE_CHECKING:
     from minecraft_cv.capture.source import FrameSource
@@ -62,7 +60,12 @@ class StepResult:
     left_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
     right_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
     wasd_held: frozenset[str] = field(default_factory=frozenset)
-    inventory_active: bool = False
+    left_gestures: frozenset[str] = field(default_factory=frozenset)
+    """Left-hand logical gestures currently held by the detector layer."""
+    right_gestures: frozenset[str] = field(default_factory=frozenset)
+    """Right-hand logical gestures currently held by the detector layer."""
+    relocalized_hands: frozenset[str] = field(default_factory=frozenset)
+    """Hands whose joystick neutral was relocalized on this frame."""
 
     # Debug-only fields (populated when the overlay is drawn; zero/None otherwise).
     # These never affect emission (hard invariant #2).
@@ -73,7 +76,7 @@ class StepResult:
     left_neutral: np.ndarray | None = None
     """Left joystick neutral ``(x, y)`` at the time of this step."""
     right_neutral: np.ndarray | None = None
-    """Right joystick neutral ``(x, y)`` at the time of this step."""
+    """Current right thumb cursor point ``(x, y)`` at the time of this step."""
     deadzone: float = 0.0
     """Deadzone radius used by the left joystick (for overlay ring)."""
     left_status: HandStatus = "absent"
@@ -92,14 +95,12 @@ class Pipeline:
         left_joystick: JoystickLike,
         right_joystick: JoystickLike,
         bindings: dict[str, str],
-        joystick_signal: Callable[[np.ndarray], np.ndarray] = screen_mcp_centroid,
+        joystick_signal: Callable[[np.ndarray], np.ndarray] | None = None,
+        left_joystick_signal: Callable[[np.ndarray], np.ndarray] | None = None,
+        right_joystick_signal: Callable[[np.ndarray], np.ndarray] | None = None,
         swap_handedness: bool = True,
-        pulse_gestures: frozenset[str] = frozenset(),
         scroll_repeat_rate_hz: float = 8.0,
         look_filter: OneEuroFilter | None = None,
-        inventory_toggle: InventoryModeToggle | None = None,
-        cursor_gain: float = 1.0,
-        sprint_trigger: SprintVelocityTrigger | None = None,
         left_recovery: HandRecovery | None = None,
         right_recovery: HandRecovery | None = None,
         min_emit_confidence: float = 0.0,
@@ -112,27 +113,22 @@ class Pipeline:
             emitter: OS-input emitter (``NullEmitter`` for tests/dry-runs).
             guard: Tracking-loss guard wrapping both hands' gesture state machines.
             left_joystick: Left-hand joystick (-> WASD).
-            right_joystick: Right-hand joystick (-> relative mouse move).
+            right_joystick: Right-hand gain holder / HUD surface for relative mouse move.
             bindings: Map of gesture/direction name -> OS key name.
-            joystick_signal: Landmark signal extractor passed into both joysticks.
+            joystick_signal: Legacy signal extractor passed into both joysticks when the
+                per-hand extractors are omitted.
+            left_joystick_signal: Landmark signal extractor for movement.
+            right_joystick_signal: Landmark signal extractor for mouse look/cursor motion.
             swap_handedness: If True, invert MediaPipe L/R labels in ``_split``.
-            pulse_gestures: Legacy one-shot gestures; the default detector map uses holds.
             scroll_repeat_rate_hz: Repeat rate for hotbar scroll while pinch is held.
-            look_filter: Optional One-Euro filter smoothing the right-hand mouse-look output
-                before emission. ``None`` falls back to the joystick's EMA smoothing only.
-            inventory_toggle: Optional two-hand-pose detector for inventory mode. ``None``
-                disables inventory mode entirely.
-            cursor_gain: Gain mapping the right-hand normalized anchor displacement to
-                normalized screen displacement when driving the absolute cursor (inventory).
-            sprint_trigger: Optional depth-velocity Sprint trigger (Task 2). ``None`` disables
-                velocity sprint (the configured ``sprint`` gesture is unaffected).
+            look_filter: Legacy smoothing filter retained for reset compatibility.
             left_recovery: Per-hand tracking-loss recovery controller for the left hand
                 (Task 5). ``None`` builds a default one.
             right_recovery: As above for the right hand.
             min_emit_confidence: Drop detected hands whose handedness score is below this in
                 :meth:`_split` (they are then treated as absent by the recovery path).
             clock: Monotonic seconds source; injectable for deterministic tests. Used for
-                scroll-repeat timing, the look filter, sprint velocity, and recovery windows.
+                scroll-repeat timing, the look filter, and recovery windows.
             look_accel_exponent: Ease-in exponent for the exponential acceleration curve
                 applied to the mouse-look output. ``> 1`` keeps small tilts precise and
                 large tilts fast; ``1.0`` is a linear pass-through.
@@ -142,15 +138,14 @@ class Pipeline:
         self.left_joystick = left_joystick
         self.right_joystick = right_joystick
         self.bindings = bindings
-        self.joystick_signal = joystick_signal
+        self.left_joystick_signal = left_joystick_signal or joystick_signal or screen_mcp_centroid
+        self.right_joystick_signal = right_joystick_signal or joystick_signal or screen_thumb_tip
+        # Backwards-compatible alias for tests/tools that inspect the movement signal.
+        self.joystick_signal = self.left_joystick_signal
         self.recenter_grace_frames = 3
         self.swap_handedness = swap_handedness
-        self.pulse_gestures = pulse_gestures
         self.scroll_repeat_rate_hz = scroll_repeat_rate_hz
         self.look_filter = look_filter
-        self.inventory_toggle = inventory_toggle
-        self.cursor_gain = cursor_gain
-        self.sprint_trigger = sprint_trigger
         self.left_recovery = left_recovery if left_recovery is not None else HandRecovery()
         self.right_recovery = right_recovery if right_recovery is not None else HandRecovery()
         self.min_emit_confidence = min_emit_confidence
@@ -158,7 +153,7 @@ class Pipeline:
         self._wasd_held: set[str] = set()
         self._left_miss = 0
         self._right_miss = 0
-        self._sprint_active = False
+        self._right_cursor_prev: np.ndarray | None = None
         self._look_accel_exponent = look_accel_exponent
         # Scroll repeat state: track last scroll time per direction for rate limiting.
         self._last_scroll_time: dict[str, float] = {}
@@ -195,10 +190,9 @@ class Pipeline:
         right_joy = ScreenJoystick(
             j.deadzone,
             j.right_sensitivity,
-            j.smoothing,
+            j.right_smoothing if j.right_smoothing is not None else j.smoothing,
             fixed_neutral=j.fixed_right_neutral,
         )
-        joystick_signal = screen_mcp_centroid
         look_filter = (
             OneEuroFilter(
                 min_cutoff=j.one_euro_min_cutoff,
@@ -208,25 +202,6 @@ class Pipeline:
             if j.look_filter == "one_euro"
             else None
         )
-        inv = settings.inventory
-        inventory_toggle = InventoryModeToggle(
-            enabled=inv.enabled,
-            open_threshold=inv.open_threshold,
-            thumb_open_threshold=inv.thumb_open_threshold,
-            hold_frames=inv.hold_frames,
-            cooldown_frames=inv.cooldown_frames,
-        )
-        sp = settings.sprint
-        sprint_trigger = (
-            SprintVelocityTrigger(
-                v_sprint=sp.v_sprint,
-                trigger_frames=sp.trigger_frames,
-                release_margin=sp.release_margin,
-                enabled=True,
-            )
-            if sp.enabled
-            else None
-        )
         tr = settings.tracking
         return cls(
             emitter=emitter if emitter is not None else create_emitter(settings),
@@ -234,14 +209,11 @@ class Pipeline:
             left_joystick=left_joy,
             right_joystick=right_joy,
             bindings=dict(settings.bindings),
-            joystick_signal=joystick_signal,
+            left_joystick_signal=screen_mcp_centroid,
+            right_joystick_signal=screen_thumb_tip,
             swap_handedness=settings.tracking.swap_handedness,
-            pulse_gestures=left_sm.pulse_gestures,
             scroll_repeat_rate_hz=settings.input.scroll_repeat_rate_hz,
             look_filter=look_filter,
-            inventory_toggle=inventory_toggle,
-            cursor_gain=inv.cursor_gain,
-            sprint_trigger=sprint_trigger,
             left_recovery=HandRecovery(tr.dropout_flush_ms, tr.stabilization_ms),
             right_recovery=HandRecovery(tr.dropout_flush_ms, tr.stabilization_ms),
             min_emit_confidence=tr.min_emit_confidence,
@@ -273,15 +245,6 @@ class Pipeline:
         left_status: HandStatus = _hand_status(left_lm, left_dec)
         right_status: HandStatus = _hand_status(right_lm, right_dec)
 
-        # Inventory-mode toggle is evaluated first; a flip cleans up movement state so the
-        # mode boundary never leaves a key stuck or a stale neutral behind.
-        inventory_active = False
-        if self.inventory_toggle is not None:
-            toggle = self.inventory_toggle.update(left_lm, right_lm)
-            inventory_active = toggle.active
-            if toggle.toggled:
-                self._on_inventory_toggle()
-
         # Feed each hand's landmarks to its gesture machine only when that hand may emit
         # (NORMAL phase). Absent or stabilizing -> pass None so the machine resets: no stuck
         # keys, and no phantom presses fired during the re-entry settle window.
@@ -289,33 +252,24 @@ class Pipeline:
             left_lm if left_dec.emit else None,
             right_lm if right_dec.emit else None,
         )
-        
+
         events = []
+        relocalized_hands: set[str] = set()
         for event in raw_events:
-            if event.gesture == "recenter" and event.action == KEY_DOWN:
-                if event.hand == "left" and left_lm is not None:
-                    self.left_joystick.recenter_at(self.joystick_signal(left_lm))
-                elif event.hand == "right" and right_lm is not None:
-                    self.right_joystick.recenter_at(self.joystick_signal(right_lm))
+            if event.gesture == "recenter":
+                if event.action == KEY_DOWN:
+                    if event.hand == "left" and left_lm is not None:
+                        self._relocalize_left(left_lm)
+                        relocalized_hands.add("left")
+                    elif event.hand == "right" and right_lm is not None:
+                        self._relocalize_right(right_lm)
+                        relocalized_hands.add("right")
                 continue
             events.append(event)
 
         for event in events:
-            # In inventory mode, suppress new LEFT-hand gameplay actions (jump/sneak/
-            # inventory/Q/F) so menu navigation can't fire them. KEY_UP still passes through so any
-            # key held when the mode was entered is released, never stuck.
-            if inventory_active and event.hand == "left" and event.action == KEY_DOWN:
-                continue
-
             binding = self.bindings.get(event.gesture)
             if binding is None:
-                continue
-
-            # Pulse gestures: fire a key tap on engage, ignore the release.
-            if event.gesture in self.pulse_gestures:
-                if event.action == KEY_DOWN:
-                    self.emitter.key_tap(binding)
-                # KEY_UP for pulse gestures is handled internally — no OS key_up needed.
                 continue
 
             # Scroll gestures: emit scroll ticks instead of key presses.
@@ -336,30 +290,29 @@ class Pipeline:
         # Handle scroll repeat for held hotbar gestures.
         self._repeat_scroll(now)
 
-        if inventory_active:
-            # WASD paused; the right hand drives the OS cursor in absolute screen coords.
-            self._apply_wasd(set())
-            self._release_sprint()
-            right_out = self._update_cursor(right_lm if right_dec.emit else None)
-            return StepResult(
-                events=events,
-                left_output=self.left_joystick.zero(),
-                right_output=right_out,
-                wasd_held=frozenset(),
-                inventory_active=True,
-                left_status=left_status,
-                right_status=right_status,
-            )
+        # Collect debug signals for the HUD. These reads do not affect input emission.
+        left_held = self.guard.left_held
+        right_held = self.guard.right_held
+        left_sig = self.left_joystick_signal(left_lm) if left_lm is not None else None
+        right_sig = self.right_joystick_signal(right_lm) if right_lm is not None else None
 
         left_out = self._update_translation(left_lm, left_dec, now)
-        right_out = self._update_look(right_lm, right_dec, now)
-
-        # Collect debug signals for the HUD (cheap attribute reads; no allocation when overlay is off).
-        left_sig = (
-            self.joystick_signal(left_lm) if left_lm is not None else None
+        right_out = self._update_look(
+            right_lm,
+            right_dec,
+            now,
+            suppress_emit="recenter" in right_held,
         )
-        right_sig = (
-            self.joystick_signal(right_lm) if right_lm is not None else None
+
+        left_neutral = (
+            self.left_joystick.neutral.copy()
+            if self.left_joystick.neutral is not None
+            else None
+        )
+        right_neutral = (
+            self.right_joystick.neutral.copy()
+            if self.right_joystick.neutral is not None
+            else None
         )
 
         return StepResult(
@@ -367,94 +320,42 @@ class Pipeline:
             left_output=left_out,
             right_output=right_out,
             wasd_held=frozenset(self._wasd_held),
-            inventory_active=False,
+            left_gestures=left_held,
+            right_gestures=right_held,
+            relocalized_hands=frozenset(relocalized_hands),
             left_signal=left_sig,
             right_signal=right_sig,
-            left_neutral=self.left_joystick.neutral.copy() if self.left_joystick.neutral is not None else None,
-            right_neutral=self.right_joystick.neutral.copy() if self.right_joystick.neutral is not None else None,
+            left_neutral=left_neutral,
+            right_neutral=right_neutral,
             deadzone=self.left_joystick.deadzone,
             left_status=left_status,
             right_status=right_status,
         )
 
-    def _on_inventory_toggle(self) -> None:
-        """Clean up movement state when inventory mode flips (either direction).
-
-        Releases held WASD keys and any held left-hand gesture keys, recenters both joysticks,
-        and resets the look filter so neither mode inherits stale state from the other.
-        """
+    def _relocalize_left(self, landmarks: np.ndarray) -> None:
+        """Recenter movement at the current left hand and clear movement state."""
         self._apply_wasd(set())
-        self._release_sprint()
-        for event in self.guard.reset_left():
-            binding = self.bindings.get(event.gesture)
-            if binding is not None and binding not in ("scroll_up", "scroll_down"):
-                self.emitter.key_up(binding)
-        self.left_joystick.reset_neutral()
-        self.right_joystick.reset_neutral()
+        self.left_joystick.recenter_at(self.left_joystick_signal(landmarks))
+
+    def _relocalize_right(self, landmarks: np.ndarray) -> None:
+        """Reset the right thumb cursor point and emit no mouse movement."""
+        self.emitter.mouse_stop()
+        self._seed_right_cursor(self.right_joystick_signal(landmarks))
         if self.look_filter is not None:
             self.look_filter.reset()
 
     # --- tracking-loss flush helpers (Task 5) -------------------------------
     def _flush_left(self) -> None:
-        """Hard-flush the left hand after a sustained dropout: recenter + drop sprint."""
-        self._release_sprint()
-        if self.sprint_trigger is not None:
-            self.sprint_trigger.reset_neutral()
+        """Hard-flush the left hand after a sustained dropout."""
         self.left_joystick.reset_neutral()
 
     def _flush_right(self) -> None:
-        """Hard-flush the right hand: recenter the look joystick + drop look velocity."""
+        """Hard-flush the right hand: clear cursor history and stop mouse output."""
+        self.emitter.mouse_stop()
+        self._right_cursor_prev = None
         self.right_joystick.reset_neutral()
         if self.look_filter is not None:
             self.look_filter.reset()
-
-    def _release_sprint(self) -> None:
-        """Release a held velocity-sprint Ctrl and disarm the trigger (fail-safe)."""
-        if self._sprint_active:
-            key = self.bindings.get("sprint")
-            if key is not None:
-                self.emitter.key_up(key)
-            self._sprint_active = False
-        if self.sprint_trigger is not None:
-            self.sprint_trigger.reset()
-
-    def _update_sprint(self, landmarks: np.ndarray, now: float) -> None:
-        """Advance the depth-velocity sprint trigger and emit/clear the Sprint key (Ctrl).
-
-        Args:
-            landmarks: ``(21, 3)`` left-hand landmarks for this frame.
-            now: Monotonic timestamp (seconds) for the velocity estimate.
-        """
-        if self.sprint_trigger is None:
-            return
-        z = float(landmarks[0][2])  # 0 is the wrist
-        token = self.sprint_trigger.update(z, now)
-        key = self.bindings.get("sprint")
-        if key is None:
-            return
-        if token == ENGAGE:
-            self.emitter.key_down(key)
-            self._sprint_active = True
-        elif token == RELEASE:
-            self.emitter.key_up(key)
-            self._sprint_active = False
-
-    def _update_cursor(self, landmarks: np.ndarray | None) -> np.ndarray:
-        if landmarks is None:
-            return np.zeros(2, dtype=np.float64)
-        signal = self.joystick_signal(landmarks)
-        # We must call update to seed the neutral on first appearance.
-        # But we don't want the curved delta, we want the raw linear delta for the cursor.
-        self.right_joystick.update(signal)
-        neutral = self.right_joystick.neutral
-        if neutral is None:
-            return np.zeros(2, dtype=np.float64)
-        sensitivity = self.right_joystick.sensitivity
-        norm_delta = np.clip((signal[:2] - neutral) * sensitivity, -1.0, 1.0)
-        screen = 0.5 + norm_delta * 0.5 * self.cursor_gain
-        screen = np.clip(screen, 0.0, 1.0)
-        self.emitter.mouse_move_abs(float(screen[0]), float(screen[1]))
-        return screen
 
     def _repeat_scroll(self, now: float) -> None:
         """Re-emit scroll ticks for held hotbar gestures at the configured repeat rate."""
@@ -479,52 +380,72 @@ class Pipeline:
             if self._left_miss >= self.recenter_grace_frames:
                 self.left_joystick.reset_neutral()
             self._apply_wasd(set())
-            self._release_sprint()
             return self.left_joystick.zero()
         self._left_miss = 0
         if not dec.emit:
             # Stabilizing on re-entry: feed coords so the neutral re-seeds, but emit nothing.
-            self.left_joystick.update(self.joystick_signal(landmarks))
+            self.left_joystick.update(self.left_joystick_signal(landmarks))
             self._apply_wasd(set())
             return self.left_joystick.zero()
-        out = self.left_joystick.update(self.joystick_signal(landmarks))
-        self._update_sprint(landmarks, now)
+        out = self.left_joystick.update(self.left_joystick_signal(landmarks))
         target = self._wasd_targets(out)
-        if self._sprint_active:
-            # Sprint forces forward (W) held alongside Ctrl, even at joystick neutral.
-            target.add(self.bindings["forward"])
         self._apply_wasd(target)
         return out
 
     def _update_look(
-        self, landmarks: np.ndarray | None, dec: RecoveryDecision, now: float
+        self,
+        landmarks: np.ndarray | None,
+        dec: RecoveryDecision,
+        now: float,
+        *,
+        suppress_emit: bool = False,
     ) -> np.ndarray:
         if not dec.present or landmarks is None:
             self._right_miss += 1
+            self._right_cursor_prev = None
             if self._right_miss >= self.recenter_grace_frames:
                 self.right_joystick.reset_neutral()
-            # Drop the look filter's velocity history so re-entry doesn't jerk the camera.
+            # Drop cursor history so re-entry does not jump from a stale thumb point.
             if self.look_filter is not None:
                 self.look_filter.reset()
+            self.emitter.mouse_stop()
             return self.right_joystick.zero()
         self._right_miss = 0
-        if not dec.emit:
-            # Stabilizing: re-seed the neutral, keep the filter clear, emit no mouse-look.
-            self.right_joystick.update(self.joystick_signal(landmarks))
+        if suppress_emit:
+            # Peace sign is the "mouse lifted" clutch: keep moving the neutral to the
+            # thumb while held, but never send look/click movement from the right hand.
+            self._seed_right_cursor(self.right_joystick_signal(landmarks))
             if self.look_filter is not None:
                 self.look_filter.reset()
+            self.emitter.mouse_stop()
             return self.right_joystick.zero()
-        out = self.right_joystick.update(self.joystick_signal(landmarks))
-        # Apply acceleration curve before the One-Euro filter so the filter smooths the
-        # already-shaped signal (not the pre-shaped raw delta).
-        max_out = getattr(self.right_joystick, "max_output", 1.0)
-        out = accel_curve(out, self._look_accel_exponent, max_out)
-        if self.look_filter is not None:
-            # Velocity-adaptive smoothing: steady at rest, snappy in motion. (Task 4.)
-            out = self.look_filter.filter(out, now)
+        if not dec.emit:
+            # Stabilizing: re-seed the neutral, keep the filter clear, emit no mouse-look.
+            self._seed_right_cursor(self.right_joystick_signal(landmarks))
+            if self.look_filter is not None:
+                self.look_filter.reset()
+            self.emitter.mouse_stop()
+            return self.right_joystick.zero()
+        signal = self.right_joystick_signal(landmarks)
+        if self._right_cursor_prev is None:
+            self._seed_right_cursor(signal)
+            self.emitter.mouse_stop()
+            return self.right_joystick.zero()
+
+        out = (signal - self._right_cursor_prev) * self.right_joystick.sensitivity
+        self._seed_right_cursor(signal)
         if out[0] != 0.0 or out[1] != 0.0:
             self.emitter.mouse_move(float(out[0]), float(out[1]))
+        else:
+            self.emitter.mouse_stop()
         return out
+
+    def _seed_right_cursor(self, signal: np.ndarray) -> None:
+        """Set the right thumb's current cursor point without emitting movement."""
+        cursor = np.asarray(signal, dtype=np.float64)[:2]
+        self._right_cursor_prev = cursor.copy()
+        # Keep the existing HUD/relocalization surface pointed at the current thumb.
+        self.right_joystick.recenter_at(cursor)
 
     def _wasd_targets(self, output: np.ndarray) -> set[str]:
         return octant_keys(output, self.bindings)
@@ -565,9 +486,39 @@ class Pipeline:
             if binding is not None and binding not in ("scroll_up", "scroll_down"):
                 self.emitter.key_up(binding)
         self._apply_wasd(set())
-        self._release_sprint()
         self._last_scroll_time.clear()
         self.emitter.release_all()
+
+    def recenter(self) -> None:
+        """Recenter both spatial joysticks at the current hand position on the next frame.
+
+        The screen-space joysticks re-seed their neutral from the first sample after a reset,
+        so clearing the neutrals here makes the *next* processed frame adopt the hand's current
+        rest pose as center — the manual equivalent of the peace-sign recenter macro. Held
+        movement keys and mouse motion are released first so nothing is stranded. Used by the
+        desktop app's "Calibrate" button.
+        """
+        self._apply_wasd(set())
+        self.left_joystick.reset_neutral()
+        self._right_cursor_prev = None
+        self.right_joystick.reset_neutral()
+        self.emitter.mouse_stop()
+        if self.look_filter is not None:
+            self.look_filter.reset()
+
+    def set_emitter(self, emitter: InputEmitter) -> None:
+        """Swap the OS-input emitter at runtime (e.g. the Dry-Run <-> Live toggle).
+
+        Releases everything currently held on the old emitter first (via :meth:`shutdown`), so
+        toggling never leaves a key stuck down. Detector/joystick state is reset; the user
+        re-engages gestures after the swap.
+
+        Args:
+            emitter: The new emitter to drive (``NullEmitter`` for Dry-Run, the macOS emitter
+                for Live).
+        """
+        self.shutdown()
+        self.emitter = emitter
 
 
 # ---------------------------------------------------------------------------
@@ -609,93 +560,63 @@ def run_pipeline(
     """
     import cv2  # lazy: keeps this module importable without OpenCV (tests)
 
-    from minecraft_cv.capture.buffer import FrameBuffer
-    from minecraft_cv.capture.source import AVFoundationSource
+    from minecraft_cv.runtime import FrameProcessor
 
-    pipeline = Pipeline.from_settings(
+    processor = FrameProcessor.from_settings(
         settings,
+        source=source,
         allow_uncalibrated_palm_normal=allow_uncalibrated_palm_normal,
-    )
-    if source is None:
-        source = AVFoundationSource(
-            index=settings.camera.index,
-            width=settings.camera.width,
-            height=settings.camera.height,
-            fps=settings.camera.fps,
-        )
+    ).start()
 
-    tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
-    buffer = FrameBuffer(source).start()
-    res_w, res_h = settings.tracking.input_resolution
-    mirror = settings.camera.mirror
-    overlay = True
+    overlay = settings.debug.overlay
     overlay_every = max(1, settings.debug.overlay_every)
     window = "minecraft_cv"
-
-    # Pre-allocate reuse buffers for the hot loop
-    small_bgr = np.empty((res_h, res_w, 3), dtype=np.uint8)
-    small_rgb = np.empty((res_h, res_w, 3), dtype=np.uint8)
-
-    last_seq = -1
-    processed = 0
-    dropped = 0
-    t_start = time.monotonic()
-    last_frame_time = t_start
+    decimation = 0
+    relocalized_flash_until: dict[str, float] = {}
 
     try:
         while True:
-            if buffer.error:
-                raise buffer.error
-            if time.monotonic() - last_frame_time > 2.0:
-                raise RuntimeError("Camera stalled")
-
-            seq, frame = buffer.latest()
-            if frame is None:
-                if buffer.exhausted:
+            packet = processor.process_once()
+            if packet is None:
+                if processor.exhausted:
                     break
                 time.sleep(0.001)
                 continue
-            if seq == last_seq:
-                time.sleep(0.001)
-                continue
-            if last_seq != -1 and seq > last_seq + 1:
-                dropped += (seq - last_seq - 1)
-            last_seq = seq
-            last_frame_time = time.monotonic()
 
-            # Mirror first, in place, so tracking, the joystick vectors, the WASD directions,
-            # and the debug overlay all share one consistent (mirrored) frame of reference.
-            if mirror:
-                frame = cv2.flip(frame, 1)
-
-            # Resize BEFORE color convert, and use pre-allocated buffers
-            cv2.resize(frame, (res_w, res_h), dst=small_bgr)
-            cv2.cvtColor(small_bgr, cv2.COLOR_BGR2RGB, dst=small_rgb)
-
-            results = tracker.detect(small_rgb)
-            result = pipeline.step(results)
-            processed += 1
+            decimation += 1
+            step = packet.step
+            now = time.monotonic()
+            if step.relocalized_hands:
+                for hand in step.relocalized_hands:
+                    relocalized_flash_until[hand] = now + 0.75
+            flash_hands = frozenset(
+                hand for hand, until in relocalized_flash_until.items() if until >= now
+            )
 
             # Overlay is a debug-only luxury and not free; decimate the (HighGUI) draw to
             # protect the real-time loop. Tracking/gestures/input still run every frame.
-            if overlay and processed % overlay_every == 0:
-                _draw_overlay(frame, results, result)
-                cv2.imshow(window, frame)
+            if overlay and (decimation % overlay_every == 0 or step.relocalized_hands):
+                _draw_overlay(
+                    packet.frame,
+                    list(packet.hands),
+                    step,
+                    live_input=settings.input.enabled,
+                    flash_hands=flash_hands,
+                )
+                cv2.imshow(window, packet.frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
-            if buffer.exhausted:
+            if processor.exhausted:
                 break
     finally:
-        t_elapsed = time.monotonic() - t_start
-        fps = processed / t_elapsed if t_elapsed > 0 else 0.0
+        t_elapsed = processor.elapsed
+        fps = processor.processed / t_elapsed if t_elapsed > 0 else 0.0
         print(
             "Pipeline shutdown. "
-            f"Processed {processed} frames in {t_elapsed:.2f}s "
-            f"({fps:.1f} FPS), dropped {dropped} frames."
+            f"Processed {processor.processed} frames in {t_elapsed:.2f}s "
+            f"({fps:.1f} FPS), dropped {processor.dropped} frames."
         )
-        pipeline.shutdown()
-        buffer.stop()
-        tracker.close()
+        processor.shutdown()
         if overlay:
             cv2.destroyAllWindows()
 
@@ -704,54 +625,66 @@ def run_pipeline(
 # Full debug HUD
 # ---------------------------------------------------------------------------
 
-# Joystick gizmo rendering scale (pixels per unit of joystick output).
-_GIZMO_SCALE = 80
-# Gizmo anchor offsets from the frame corners (pixels).
-_GIZMO_MARGIN = 100
-
 # Colour palette (BGR).
-_COL_ACTIVE = (0, 255, 80)       # bright green — active key / live vector
-_COL_IDLE = (80, 80, 80)         # dark grey — deadzone ring / idle elements
-_COL_ZONE = (0, 180, 255)        # amber-yellow — cardinal zone wedge outline
-_COL_ZONE_ACTIVE = (0, 255, 255) # bright yellow — active cardinal zone
-_COL_WASD = (200, 200, 200)      # light grey — WASD key labels
-_COL_WASD_ON = (0, 255, 80)      # green — pressed WASD key label
-_COL_STATUS_OK = (0, 200, 80)    # green — TRACKING badge
-_COL_STATUS_STAB = (0, 140, 255) # orange — STABILIZING badge
-_COL_STATUS_ABSENT = (60, 60, 60) # dark grey — NO HAND badge
-_COL_LOOK = (255, 120, 0)        # blue — look vector
+_COL_PANEL = (24, 28, 32)
+_COL_PANEL_BORDER = (92, 102, 112)
+_COL_TEXT = (238, 242, 245)
+_COL_MUTED = (148, 158, 168)
+_COL_ACTIVE = (80, 245, 132)
+_COL_IDLE = (80, 88, 96)
+_COL_WARN = (0, 128, 255)
+_COL_LIVE = (52, 82, 255)
+_COL_DRY = (80, 210, 120)
+_COL_FLASH = (0, 255, 255)
+_COL_LOOK = (255, 150, 42)
+_COL_MOVE = (86, 218, 255)
 
 _STATUS_COLOUR: dict[HandStatus, tuple[int, int, int]] = {
-    "normal": _COL_STATUS_OK,
-    "stabilizing": _COL_STATUS_STAB,
-    "absent": _COL_STATUS_ABSENT,
+    "normal": _COL_ACTIVE,
+    "stabilizing": _COL_WARN,
+    "absent": _COL_IDLE,
 }
 _STATUS_LABEL: dict[HandStatus, str] = {
-    "normal": "TRACKING",
-    "stabilizing": "STABILIZING",
+    "normal": "OK",
+    "stabilizing": "SETTLING",
     "absent": "NO HAND",
 }
 
+_LEFT_COMMANDS = (
+    ("Jump", "jump"),
+    ("Inventory", "inventory"),
+    ("Throw", "throw_item"),
+    ("Sneak", "sneak"),
+    ("Relocalize", "recenter"),
+)
+_RIGHT_COMMANDS = (
+    ("Attack", "attack"),
+    ("Use", "use"),
+    ("Hotbar +", "hotbar_next"),
+    ("Hotbar -", "hotbar_prev"),
+    ("Relocalize", "recenter"),
+)
 
-def _draw_overlay(frame: np.ndarray, results: list[HandResult], step: StepResult) -> None:
+
+def _draw_overlay(
+    frame: np.ndarray,
+    results: list[HandResult],
+    step: StepResult,
+    *,
+    live_input: bool,
+    flash_hands: frozenset[str],
+) -> None:
     """Draw a full HUD onto ``frame`` (debug only, gated behind ``--debug-overlay``)."""
     import cv2
-    import math as _math
 
     h, w = frame.shape[:2]
 
-    # --- Landmark dots ----------------------------------------------------------
     for hand in results:
         for x, y, _ in hand.landmarks:
-            cv2.circle(frame, (int(x * w), int(y * h)), 3, (0, 255, 0), -1)
+            cv2.circle(frame, (int(x * w), int(y * h)), 3, _COL_ACTIVE, -1)
 
-    # --- Gesture / WASD text (top-left) ----------------------------------------
-    text = " ".join(f"{e.gesture}:{e.action}" for e in step.events) or "-"
-    cv2.putText(frame, text, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
-    wasd = "".join(sorted(step.wasd_held)) or "."
-    cv2.putText(frame, f"WASD:{wasd}", (8, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
+    _draw_command_panel(frame, step, live_input=live_input, flash_hands=flash_hands)
 
-    # --- Left-hand joystick gizmo ----------------------------------------------
     if step.left_neutral is not None:
         _draw_joystick_gizmo(
             frame,
@@ -762,14 +695,12 @@ def _draw_overlay(frame: np.ndarray, results: list[HandResult], step: StepResult
             output=np.array(step.left_output) if step.left_output is not None else None,
             deadzone=step.deadzone,
             wasd_held=step.wasd_held,
-            bindings_fwd_back_left_right=(
-                step.wasd_held,  # passed as held set; gizmo knows the key names
-            ),
             status=step.left_status,
+            label="MOVE",
+            relocalized="left" in flash_hands,
             is_look=False,
         )
 
-    # --- Right-hand look gizmo -------------------------------------------------
     if step.right_neutral is not None:
         _draw_joystick_gizmo(
             frame,
@@ -778,12 +709,102 @@ def _draw_overlay(frame: np.ndarray, results: list[HandResult], step: StepResult
             signal=step.right_signal,
             neutral=step.right_neutral,
             output=np.array(step.right_output) if step.right_output is not None else None,
-            deadzone=step.deadzone,
+            deadzone=0.0,
             wasd_held=step.wasd_held,
-            bindings_fwd_back_left_right=(step.wasd_held,),
             status=step.right_status,
+            label="CURSOR",
+            relocalized="right" in flash_hands,
             is_look=True,
         )
+
+
+def _draw_command_panel(
+    frame: np.ndarray,
+    step: StepResult,
+    *,
+    live_input: bool,
+    flash_hands: frozenset[str],
+) -> None:
+    """Draw the player-facing command state panel."""
+    import cv2
+
+    x, y = 10, 10
+    width, height = 330, 260
+    frame_h, frame_w = frame.shape[:2]
+    width = min(width, frame_w - 20)
+    height = min(height, frame_h - 20)
+    _alpha_rect(frame, x, y, x + width, y + height, _COL_PANEL, 0.78)
+    cv2.rectangle(frame, (x, y), (x + width, y + height), _COL_PANEL_BORDER, 1)
+
+    mode_text = "LIVE INPUT" if live_input else "DRY RUN"
+    mode_col = _COL_LIVE if live_input else _COL_DRY
+    _draw_text(frame, mode_text, x + 12, y + 24, 0.56, mode_col, 2)
+    status = f"L {_STATUS_LABEL[step.left_status]}   R {_STATUS_LABEL[step.right_status]}"
+    _draw_text(frame, status, x + 132, y + 24, 0.43, _COL_TEXT, 1)
+
+    if flash_hands:
+        label = "RELOCALIZED " + "/".join(hand.upper()[0] for hand in sorted(flash_hands))
+        _draw_text(frame, label, x + 12, y + 48, 0.48, _COL_FLASH, 2)
+    else:
+        latest = " ".join(f"{e.gesture}:{e.action.replace('KEY_', '')}" for e in step.events)
+        _draw_text(frame, latest[:34] or "ready", x + 12, y + 48, 0.43, _COL_MUTED, 1)
+
+    _draw_text(frame, "WASD", x + 12, y + 75, 0.45, _COL_MUTED, 1)
+    for i, key in enumerate(("w", "a", "s", "d")):
+        _draw_badge(frame, x + 58 + i * 34, y + 59, key.upper(), key in step.wasd_held)
+
+    _draw_command_column(
+        frame,
+        "LEFT",
+        _LEFT_COMMANDS,
+        step.left_gestures,
+        x + 12,
+        y + 104,
+        flash="left" in flash_hands,
+    )
+    _draw_command_column(
+        frame,
+        "RIGHT",
+        _RIGHT_COMMANDS,
+        step.right_gestures,
+        x + 172,
+        y + 104,
+        flash="right" in flash_hands,
+    )
+
+
+def _draw_command_column(
+    frame: np.ndarray,
+    title: str,
+    commands: tuple[tuple[str, str], ...],
+    held: frozenset[str],
+    x: int,
+    y: int,
+    *,
+    flash: bool,
+) -> None:
+    """Draw one compact command list with active indicators."""
+    import cv2
+
+    _draw_text(frame, title, x, y, 0.43, _COL_MUTED, 1)
+    row_y = y + 20
+    for label, gesture in commands:
+        active = gesture in held or (gesture == "recenter" and flash)
+        col = _COL_FLASH if gesture == "recenter" and flash else _COL_ACTIVE
+        cv2.circle(frame, (x + 6, row_y - 4), 5, col if active else _COL_IDLE, -1)
+        _draw_text(frame, label, x + 18, row_y, 0.41, _COL_TEXT if active else _COL_MUTED, 1)
+        row_y += 21
+
+
+def _draw_badge(frame: np.ndarray, x: int, y: int, text: str, active: bool) -> None:
+    """Draw a small fixed-size key badge."""
+    import cv2
+
+    col = _COL_ACTIVE if active else _COL_IDLE
+    cv2.rectangle(frame, (x, y), (x + 26, y + 22), col, 1)
+    if active:
+        _alpha_rect(frame, x + 1, y + 1, x + 25, y + 21, col, 0.30)
+    _draw_text(frame, text, x + 7, y + 16, 0.42, _COL_TEXT if active else _COL_MUTED, 1)
 
 
 def _draw_joystick_gizmo(
@@ -796,98 +817,118 @@ def _draw_joystick_gizmo(
     output: np.ndarray | None,
     deadzone: float,
     wasd_held: frozenset[str],
-    bindings_fwd_back_left_right: tuple,
     status: HandStatus,
+    label: str,
+    relocalized: bool,
     is_look: bool,
 ) -> None:
     """Draw one joystick gizmo exactly at the physical anchor point on the screen."""
-    import cv2
     import math as _math
+
+    import cv2
 
     if neutral is None:
         return
 
-    cx = int(neutral[0] * w)
-    cy = int(neutral[1] * h)
+    cx = int(np.clip(neutral[0], 0.0, 1.0) * w)
+    cy = int(np.clip(neutral[1], 0.0, 1.0) * h)
 
-    # --- Status badge -----------------------------------------------------------
-    label = _STATUS_LABEL[status]
-    col = _STATUS_COLOUR[status]
-    cv2.putText(frame, label, (cx - 45, cy + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1)
-
-    # --- Neutral dot ------------------------------------------------------------
-    cv2.circle(frame, (cx, cy), 6, (200, 200, 200), -1)
-
-    # --- Deadzone ellipse -------------------------------------------------------
-    # The deadzone is based on the normalized vector length.
-    # So the boundary is where `sqrt((dx)^2 + (dy)^2) == deadzone`.
-    # In pixel space, dx_px = dx * w, dy_px = dy * h.
-    # Thus the deadzone ring on screen is an ellipse with axes:
     dz_px_x = int(deadzone * w)
     dz_px_y = int(deadzone * h)
-    
-    if dz_px_x > 1 and dz_px_y > 1:
+    ring_col = _COL_FLASH if relocalized else (_COL_LOOK if is_look else _COL_MOVE)
+    radius = (max(dz_px_x, dz_px_y) if deadzone > 0.0 else 16) + (
+        18 if relocalized else 8
+    )
+
+    if relocalized:
+        cv2.circle(frame, (cx, cy), radius, _COL_FLASH, 3)
+
+    if deadzone > 0.0:
         cv2.ellipse(frame, (cx, cy), (dz_px_x, dz_px_y), 0, 0, 360, _COL_IDLE, 1)
+    cv2.circle(frame, (cx, cy), 6, _COL_TEXT, -1)
+    _draw_text(frame, label, cx - 20, cy - radius - 10, 0.48, ring_col, 2)
+    _draw_text(
+        frame,
+        _STATUS_LABEL[status],
+        cx - 30,
+        cy + radius + 20,
+        0.42,
+        _STATUS_COLOUR[status],
+        1,
+    )
 
-    if is_look:
-        # --- Look gizmo: simple arrow pointing in the output look direction ------
-        if output is not None and (output[0] != 0.0 or output[1] != 0.0):
-            # Scale the output purely for visual display
-            ox = int(output[0] * 50)
-            oy = int(-output[1] * 50)  # Visual inverted Y
-            cv2.arrowedLine(frame, (cx, cy), (cx + ox, cy + oy), _COL_LOOK, 2, tipLength=0.3)
-        
-        # Also draw tracking line to the hand
-        if signal is not None:
-            hx = int(signal[0] * w)
-            hy = int(signal[1] * h)
-            cv2.line(frame, (cx, cy), (hx, hy), (100, 100, 100), 1)
-        return
+    if not is_look:
+        ray_len_x = int(0.12 * w)
+        ray_len_y = int(0.12 * h)
+        for i in range(8):
+            ray_deg = 22.5 + i * 45.0
+            rx = _math.cos(_math.radians(ray_deg)) * ray_len_x
+            ry = _math.sin(_math.radians(ray_deg)) * ray_len_y
+            cv2.line(frame, (cx, cy), (int(cx + rx), int(cy + ry)), (75, 105, 110), 1)
 
-    # --- WASD zone wedges (left-hand gizmo only) --------------------------------
-    # Draw 8 slices representing the 45-degree octants. Boundaries are offset by 22.5 deg.
-    # The wedges radiate outward. Let's make them visibly large.
-    ray_len_x = int(0.12 * w)
-    ray_len_y = int(0.12 * h)
-    for i in range(8):
-        ray_deg = 22.5 + i * 45.0
-        # Octant math in pipeline uses standard atan2(dy, dx), where dy is inverted y.
-        rx = _math.cos(_math.radians(ray_deg)) * ray_len_x
-        ry = -_math.sin(_math.radians(ray_deg)) * ray_len_y  # flip y for screen
-        end = (int(cx + rx), int(cy + ry))
-        cv2.line(frame, (cx, cy), end, _COL_ZONE, 1)
-
-    # --- Live tracking line to hand ---------------------------------------------
     if signal is not None:
         hx = int(signal[0] * w)
         hy = int(signal[1] * h)
-        is_active = output is not None and (output[0] != 0.0 or output[1] != 0.0)
-        col = _COL_ACTIVE if is_active else (160, 160, 160)
-        cv2.arrowedLine(frame, (cx, cy), (hx, hy), col, 2, tipLength=0.1)
+        active = output is not None and float(np.linalg.norm(output[:2])) > 1e-6
+        line_col = ring_col if active else _COL_MUTED
+        cv2.line(frame, (cx, cy), (hx, hy), line_col, 2)
+        cv2.circle(frame, (hx, hy), 5, line_col, -1)
 
-    # --- WASD key labels around gizmo -----------------------------------------
-    label_dist_x = int(0.14 * w)
-    label_dist_y = int(0.14 * h)
-    label_positions = {
-        "w": (cx, cy - label_dist_y),
-        "a": (cx - label_dist_x, cy),
-        "s": (cx, cy + label_dist_y),
-        "d": (cx + label_dist_x, cy),
-    }
+    if output is not None and float(np.linalg.norm(output[:2])) > 1e-6:
+        ox = int(output[0] * 74)
+        oy = int(output[1] * 74)
+        cv2.arrowedLine(frame, (cx, cy), (cx + ox, cy + oy), ring_col, 3, tipLength=0.28)
 
-    # Extract held keys
-    held_set = bindings_fwd_back_left_right[0]
+    if not is_look:
+        label_dist_x = int(0.14 * w)
+        label_dist_y = int(0.14 * h)
+        positions = {
+            "w": (cx - 13, cy - label_dist_y - 11),
+            "a": (cx - label_dist_x - 13, cy - 11),
+            "s": (cx - 13, cy + label_dist_y - 11),
+            "d": (cx + label_dist_x - 13, cy - 11),
+        }
+        for key, (px, py) in positions.items():
+            _draw_badge(frame, px, py, key.upper(), key in wasd_held)
 
-    for key, pos in label_positions.items():
-        if key in held_set:
-            lcol = _COL_ACTIVE
-            thick = 2
-        else:
-            lcol = (200, 200, 200)
-            thick = 1
-        # Shift text roughly to center
-        px, py = pos
-        cv2.putText(frame, key.upper(), (px - 5, py + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, lcol, thick)
+
+def _alpha_rect(
+    frame: np.ndarray,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    color: tuple[int, int, int],
+    alpha: float,
+) -> None:
+    """Blend a solid rectangle over ``frame`` in-place."""
+    x1 = max(0, min(frame.shape[1], x1))
+    x2 = max(0, min(frame.shape[1], x2))
+    y1 = max(0, min(frame.shape[0], y1))
+    y2 = max(0, min(frame.shape[0], y2))
+    if x2 <= x1 or y2 <= y1:
+        return
+    roi = frame[y1:y2, x1:x2]
+    tint = np.full_like(roi, color)
+    import cv2
+
+    cv2.addWeighted(tint, alpha, roi, 1.0 - alpha, 0.0, dst=roi)
+
+
+def _draw_text(
+    frame: np.ndarray,
+    text: str,
+    x: int,
+    y: int,
+    scale: float,
+    color: tuple[int, int, int],
+    thickness: int,
+) -> None:
+    """Draw readable stroked text."""
+    import cv2
+
+    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thickness + 2)
+    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness)
 
 
 __all__ = ["Pipeline", "StepResult", "run_pipeline"]

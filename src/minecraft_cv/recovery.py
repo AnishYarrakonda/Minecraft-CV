@@ -15,7 +15,7 @@ actually hits:
 This controller encodes both as a small, clock-driven state machine, one instance per hand:
 
   * Continuously absent for longer than ``dropout_flush_ms`` -> emit a one-shot ``flush``
-    signal (the pipeline recenters the joystick, resets the look filter and sprint trigger).
+    signal (the pipeline recenters the joystick and resets the look filter).
   * Returning from such a flushed dropout -> a ``stabilization_ms`` window where the hand is
     *tracked* (coordinates feed the joystick so a neutral re-seeds) but **no input is emitted**.
 

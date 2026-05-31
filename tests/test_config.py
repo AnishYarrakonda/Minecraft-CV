@@ -26,21 +26,20 @@ def test_defaults_construct_without_yaml() -> None:
     assert s.joystick.deadzone == 0.04
     assert s.camera.mirror is True  # mirror view by default
     assert s.tracking.swap_handedness is True
-    assert s.inventory.enabled is False
     assert set(s.gestures.left_hand) == {
         "jump",
         "sneak",
         "inventory",
         "throw_item",
-        "switch_offhand",
         "recenter",
     }
-    assert set(s.gestures.right_hand) == {"attack", "use", "hotbar_next", "hotbar_prev", "sprint", "recenter"}
+    assert set(s.gestures.right_hand) == {"attack", "use", "hotbar_next", "hotbar_prev", "recenter"}
 
     # Check new bindings exist
-    assert s.bindings["sprint"] == "ctrl"
+    assert s.bindings["sneak"] == "shift"
     assert s.bindings["throw_item"] == "q"
-    assert s.bindings["switch_offhand"] == "f"
+    assert "sprint" not in s.bindings
+    assert "switch_offhand" not in s.bindings
 
 
 def test_load_project_config_yaml() -> None:
@@ -48,11 +47,19 @@ def test_load_project_config_yaml() -> None:
     assert s.camera.fps == 30
     assert s.tracking.backend == "mediapipe"
     assert s.gestures.left_hand["jump"].detector == "pinch"
-    assert s.gestures.left_hand["sneak"].detector == "curl_combo"
+    assert s.gestures.left_hand["sneak"].detector == "pinch"
     assert s.gestures.left_hand["sneak"].mode == "hold"
-    assert s.gestures.left_hand["sneak"].curl_fingers == ("ring", "pinky")
-    assert s.gestures.right_hand["sprint"].curl_fingers == ("ring", "pinky")
-    assert s.gestures.right_hand["sprint"].suppresses == ("hotbar_next", "hotbar_prev")
+    assert s.gestures.left_hand["sneak"].finger == "pinky"
+    assert s.gestures.left_hand["recenter"].detector == "extension_combo"
+    assert s.gestures.left_hand["recenter"].extension_fingers == ("index", "middle")
+    assert s.gestures.left_hand["recenter"].curl_fingers == ("ring", "pinky")
+    assert s.gestures.right_hand["recenter"].detector == "extension_combo"
+    assert s.gestures.right_hand["recenter"].suppresses == (
+        "attack",
+        "use",
+        "hotbar_next",
+        "hotbar_prev",
+    )
     assert s.gestures.right_hand["attack"].finger == "index"
     # input_resolution list in YAML is coerced to a tuple.
     assert s.tracking.input_resolution == (256, 256)
@@ -61,12 +68,11 @@ def test_load_project_config_yaml() -> None:
 def test_every_gesture_satisfies_hysteresis_invariant() -> None:
     s = Settings.load(CONFIG_YAML)
 
-    # Detector-backed gestures: lower is engaged -> t_release > t_engage
-    for name, g in s.gestures.right_hand.items():
-        assert g.t_release > g.t_engage, f"{name} violates t_release > t_engage"
-
-    for name, g in s.gestures.left_hand.items():
-        assert g.t_release > g.t_engage, f"{name} violates t_release > t_engage"
+    for name, g in [*s.gestures.right_hand.items(), *s.gestures.left_hand.items()]:
+        if g.detector == "extension_combo":
+            assert g.t_engage > g.t_release, f"{name} violates t_engage > t_release"
+        else:
+            assert g.t_release > g.t_engage, f"{name} violates t_release > t_engage"
 
 
 def test_pinch_inverted_thresholds_raise() -> None:
@@ -85,6 +91,10 @@ def test_detector_inverted_thresholds_raise() -> None:
     with pytest.raises(ValidationError):
         GestureDetectorSettings(
             detector="pinch", finger="index", t_engage=0.45, t_release=0.30
+        )
+    with pytest.raises(ValidationError):
+        GestureDetectorSettings(
+            detector="extension_combo", finger="index", t_engage=1.05, t_release=1.15
         )
 
 
@@ -158,9 +168,9 @@ def test_extra_keys_forbidden(tmp_path: Path) -> None:
 
 
 def test_look_accel_exponent_default() -> None:
-    """look_accel_exponent should default to 1.6."""
+    """look_accel_exponent should default to a responsive low-jitter curve."""
     s = Settings()
-    assert s.joystick.look_accel_exponent == pytest.approx(1.6)
+    assert s.joystick.look_accel_exponent == pytest.approx(1.25)
 
 
 def test_look_accel_exponent_from_yaml(tmp_path: Path) -> None:
@@ -183,5 +193,9 @@ def test_project_config_yaml_loads_new_fields() -> None:
     """The project config.yaml must load cleanly with the new fields."""
     s = Settings.load(CONFIG_YAML)
     assert s.joystick.smoothing == pytest.approx(0.4)
-    assert s.joystick.look_accel_exponent == pytest.approx(1.6)
-    assert s.input.mouse_delta_scale == pytest.approx(28.0)
+    assert s.joystick.right_smoothing == pytest.approx(0.6)
+    assert s.joystick.right_sensitivity == pytest.approx(80.0)
+    assert s.joystick.look_accel_exponent == pytest.approx(1.25)
+    assert s.joystick.one_euro_min_cutoff == pytest.approx(0.65)
+    assert s.joystick.one_euro_beta == pytest.approx(0.035)
+    assert s.input.mouse_delta_scale == pytest.approx(58.0)

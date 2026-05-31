@@ -9,8 +9,8 @@ to the terminal app running Python (System Settings -> Privacy & Security). With
 are silently dropped. We best-effort detect this at startup and raise a clear error.
 
 Mouse look uses Quartz relative deltas (``kCGMouseEventDeltaX/Y``) because Minecraft reads
-true relative motion; we emit small, frequent deltas and do not correct for macOS pointer
-acceleration at the injection level.
+true relative motion. The default path emits the thumb's per-frame movement directly rather
+than maintaining a velocity stream.
 """
 
 from __future__ import annotations
@@ -28,11 +28,15 @@ _MOUSE_BUTTONS = ("mouse_left", "mouse_right", "mouse_middle")
 class MacInputEmitter(InputEmitter):
     """Emits real keyboard/mouse events on macOS via pynput + Quartz CGEvent."""
 
-    def __init__(self, mouse_delta_scale: float = 15.0, key_repeat_guard_ms: float = 50.0) -> None:
+    def __init__(
+        self,
+        mouse_delta_scale: float = 58.0,
+        key_repeat_guard_ms: float = 50.0,
+    ) -> None:
         """Construct the emitter and verify input permissions.
 
         Args:
-            mouse_delta_scale: Multiplier from joystick units to CGEvent relative pixels.
+            mouse_delta_scale: Multiplier from normalized thumb delta to relative pixels.
             key_repeat_guard_ms: Minimum interval between repeated emits of the same event.
 
         Raises:
@@ -65,8 +69,7 @@ class MacInputEmitter(InputEmitter):
         self._mouse_mod: Any = mouse
         self._quartz: Any = Quartz
         self._last_emit: dict[str, float] = {}
-        # Main-display pixel size, for mapping normalized absolute-cursor coords (inventory
-        # mode) to physical pixels. Resolved once; a multi-monitor V2 can refine this.
+        # Main-display pixel size for normalized absolute-cursor coordinates.
         try:
             main = Quartz.CGMainDisplayID()
             self._screen_w = float(Quartz.CGDisplayPixelsWide(main))
@@ -140,21 +143,78 @@ class MacInputEmitter(InputEmitter):
         }
         return buttons[key]
 
+    def _current_mouse_position(self) -> tuple[float, float]:
+        """Return the current cursor position, falling back to display center."""
+        q = self._quartz
+        try:  # pragma: no cover - exact CGPoint shape is platform-dependent
+            event = q.CGEventCreate(None)
+            loc = q.CGEventGetLocation(event)
+            if hasattr(loc, "x") and hasattr(loc, "y"):
+                return float(loc.x), float(loc.y)
+            return float(loc[0]), float(loc[1])
+        except Exception:
+            return self._screen_w / 2.0, self._screen_h / 2.0
+
+    def _clamp_mouse_position(self, x: float, y: float) -> tuple[float, float]:
+        """Clamp a display pixel position to the main display bounds."""
+        return (
+            min(max(float(x), 0.0), self._screen_w),
+            min(max(float(y), 0.0), self._screen_h),
+        )
+
+    def _mouse_button_event_spec(self, key: str) -> tuple[Any, Any, Any]:
+        """Map logical mouse key to Quartz button/down/up constants."""
+        q = self._quartz
+        if key == "mouse_left":
+            return q.kCGMouseButtonLeft, q.kCGEventLeftMouseDown, q.kCGEventLeftMouseUp
+        if key == "mouse_right":
+            return q.kCGMouseButtonRight, q.kCGEventRightMouseDown, q.kCGEventRightMouseUp
+        return (
+            getattr(q, "kCGMouseButtonCenter", 2),
+            q.kCGEventOtherMouseDown,
+            q.kCGEventOtherMouseUp,
+        )
+
+    def _emit_mouse_button(self, key: str, *, down: bool) -> None:
+        """Emit a Quartz button event at the current cursor position."""
+        q = self._quartz
+        button, down_type, up_type = self._mouse_button_event_spec(key)
+        event = q.CGEventCreateMouseEvent(
+            None,
+            down_type if down else up_type,
+            self._current_mouse_position(),
+            button,
+        )
+        q.CGEventPost(q.kCGHIDEventTap, event)
+
+    def _post_relative_pixels(self, sx: int, sy: int) -> None:
+        """Post one relative mouse event with integer pixel deltas."""
+        if sx == 0 and sy == 0:
+            return
+        q = self._quartz
+        cx, cy = self._current_mouse_position()
+        pos = self._clamp_mouse_position(cx + sx, cy + sy)
+        event = q.CGEventCreateMouseEvent(
+            None, q.kCGEventMouseMoved, pos, q.kCGMouseButtonLeft
+        )
+        q.CGEventSetIntegerValueField(event, q.kCGMouseEventDeltaX, sx)
+        q.CGEventSetIntegerValueField(event, q.kCGMouseEventDeltaY, sy)
+        q.CGEventPost(q.kCGHIDEventTap, event)
+
     # --- primitives ---------------------------------------------------------
     def _emit_key_down(self, key: str) -> None:
         if key in _MOUSE_BUTTONS:
-            self._mouse.press(self._resolve_button(key))
+            self._emit_mouse_button(key, down=True)
         else:
             self._keyboard.press(self._resolve_key(key))
 
     def _emit_key_up(self, key: str) -> None:
         if key in _MOUSE_BUTTONS:
-            self._mouse.release(self._resolve_button(key))
+            self._emit_mouse_button(key, down=False)
         else:
             self._keyboard.release(self._resolve_key(key))
 
     def _emit_mouse_move(self, dx: float, dy: float) -> None:
-        q = self._quartz
         # Accumulate sub-pixel motion and emit only the whole-pixel part, carrying the
         # remainder so a steady slow look still advances instead of rounding away to nothing.
         self._move_accum_x += dx * self.mouse_delta_scale
@@ -163,16 +223,14 @@ class MacInputEmitter(InputEmitter):
         sy = int(self._move_accum_y)
         self._move_accum_x -= sx
         self._move_accum_y -= sy
-        if sx == 0 and sy == 0:
-            return
-        event = q.CGEventCreateMouseEvent(
-            None, q.kCGEventMouseMoved, (0.0, 0.0), q.kCGMouseButtonLeft
-        )
-        q.CGEventSetIntegerValueField(event, q.kCGMouseEventDeltaX, sx)
-        q.CGEventSetIntegerValueField(event, q.kCGMouseEventDeltaY, sy)
-        q.CGEventPost(q.kCGHIDEventTap, event)
+        self._post_relative_pixels(sx, sy)
+
+    def _emit_mouse_stop(self) -> None:
+        self._move_accum_x = 0.0
+        self._move_accum_y = 0.0
 
     def _emit_mouse_move_abs(self, x: float, y: float) -> None:
+        self._emit_mouse_stop()
         q = self._quartz
         # Clamp normalized coords and scale to main-display pixels. Absolute warp (no delta
         # fields) so the cursor jumps to the GUI position without rotating the camera.

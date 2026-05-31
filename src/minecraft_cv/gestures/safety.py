@@ -30,6 +30,8 @@ class _GestureMachine(Protocol):
 
     def update(self, landmarks: np.ndarray) -> Sequence[AnyGestureEvent]: ...
     def reset(self) -> Sequence[AnyGestureEvent]: ...
+    @property
+    def held(self) -> set[str]: ...
 
 
 class TrackingLossGuard:
@@ -94,10 +96,20 @@ class TrackingLossGuard:
         return [*self._left.reset(), *self._right.reset()]
 
     def reset_left(self) -> list[AnyGestureEvent]:
-        """Release every held LEFT-hand gesture (e.g. on entering inventory mode).
+        """Release every held LEFT-hand gesture.
 
         Returns:
             One ``KEY_UP`` event per left-hand gesture that had been holding; empty if none.
             Idempotent.
         """
         return list(self._left.reset())
+
+    @property
+    def left_held(self) -> frozenset[str]:
+        """Current left-hand held logical gestures."""
+        return frozenset(self._left.held)
+
+    @property
+    def right_held(self) -> frozenset[str]:
+        """Current right-hand held logical gestures."""
+        return frozenset(self._right.held)

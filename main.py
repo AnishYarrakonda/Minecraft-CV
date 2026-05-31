@@ -1,12 +1,12 @@
-"""Friendly all-in-one terminal launcher for minecraft_cv.
+"""Friendly launcher for minecraft_cv — opens the polished desktop app.
 
 Run with:
 
     .venv/bin/python main.py
 
-The real app logic still lives in ``minecraft_cv.cli``; this file just asks which mode you
-want, runs calibration for you when it's needed (or when you ask), and then launches the
-controller — so you never have to remember the separate ``mcv calibrate`` step.
+This just bootstraps the source path and launches the GUI (``mcv ui``), which opens in safe
+Dry-Run mode. Flip to Live, calibrate, and start/stop from inside the app. The headless
+controller and clip tools still live behind ``mcv run`` / ``mcv analyze``.
 """
 
 from __future__ import annotations
@@ -24,32 +24,9 @@ if str(SRC) not in sys.path:
 from minecraft_cv.cli import main as cli_main  # noqa: E402
 
 
-def yes_no(prompt: str, default: bool = True) -> bool:
-    """Ask a yes/no terminal question. Empty input returns the default."""
-    suffix = " [Y/n] " if default else " [y/N] "
-    while True:
-        answer = input(prompt + suffix).strip().lower()
-        if not answer:
-            return default
-        if answer in {"y", "yes"}:
-            return True
-        if answer in {"n", "no"}:
-            return False
-        print("Please enter y or n.")
-
-
 def main() -> int:
-    """Prompt for debug or real mode, then launch the controller."""
-    print("minecraft_cv launcher")
-    real_input = yes_no("Run with real Minecraft keyboard/mouse input?", default=True)
-    show_overlay = yes_no("Show camera overlay?", default=True)
-
-    args = ["run", "--input" if real_input else "--no-input"]
-    if show_overlay:
-        args.append("--debug-overlay")
-    if not real_input:
-        print("\nStarting debug mode with no real input.")
-    return cli_main(args)
+    """Launch the desktop app, forwarding any extra CLI args (e.g. ``--config``)."""
+    return cli_main(["ui", *sys.argv[1:]])
 
 
 if __name__ == "__main__":

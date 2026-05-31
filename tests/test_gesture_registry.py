@@ -55,14 +55,21 @@ def test_curl_only_requires_other_fingers_open(
 def test_curl_combo_requires_all_listed_fingers_down_but_ignores_others(
     make_screen_landmarks: Callable[..., np.ndarray],
 ) -> None:
-    sm = GestureStateMachine("right", {"sprint": Settings().gestures.right_hand["sprint"]})
+    combo = GestureDetectorSettings(
+        detector="curl_combo",
+        finger="ring",
+        t_engage=0.95,
+        t_release=1.05,
+        curl_fingers=("ring", "pinky"),
+    )
+    sm = GestureStateMachine("right", {"combo": combo})
     peace_with_thumb_relaxed = make_screen_landmarks(
         extensions={"index": 0.8, "middle": 1.3, "ring": 0.8, "pinky": 0.8},
         thumb_ext=0.4,
     )
     sm.update(peace_with_thumb_relaxed)
     events = sm.update(peace_with_thumb_relaxed)
-    assert _names(events) == {("sprint", KEY_DOWN, "right")}
+    assert _names(events) == {("combo", KEY_DOWN, "right")}
 
     ring_up = make_screen_landmarks(
         extensions={"index": 0.8, "middle": 1.3, "ring": 1.3, "pinky": 0.8},
@@ -70,38 +77,73 @@ def test_curl_combo_requires_all_listed_fingers_down_but_ignores_others(
     )
     sm.update(ring_up)
     released = sm.update(ring_up)
-    assert _names(released) == {("sprint", KEY_UP, "right")}
+    assert _names(released) == {("combo", KEY_UP, "right")}
 
 
-def test_left_sneak_holds_only_while_ring_pinky_curled(
-    make_screen_landmarks: Callable[..., np.ndarray],
+def test_left_pinky_pinch_holds_sneak(
+    make_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = GestureStateMachine("left", Settings().gestures.left_hand)
-    sneak = make_screen_landmarks(extensions={"ring": 0.8, "pinky": 0.8})
+    sneak = make_landmarks({"pinky": 0.20})
     sm.update(sneak)
     events = sm.update(sneak)
-    assert _names(events) == {("sneak", KEY_DOWN, "left"), ("recenter", KEY_DOWN, "left")}
-    assert sm.held == {"sneak", "recenter"}
+    assert _names(events) == {("sneak", KEY_DOWN, "left")}
+    assert sm.held == {"sneak"}
 
-    open_hand = make_screen_landmarks()
+    open_hand = make_landmarks({"pinky": 1.0})
     sm.update(open_hand)
     events = sm.update(open_hand)
-    assert _names(events) == {("sneak", KEY_UP, "left"), ("recenter", KEY_UP, "left")}
+    assert _names(events) == {("sneak", KEY_UP, "left")}
     assert sm.held == set()
 
 
-def test_modifier_suppresses_same_finger_pinches(
+def test_extension_combo_peace_sign_triggers_recenter_thumb_ignored(
     make_screen_landmarks: Callable[..., np.ndarray],
 ) -> None:
+    sm = GestureStateMachine("left", {"recenter": Settings().gestures.left_hand["recenter"]})
+    peace_thumb_relaxed = make_screen_landmarks(
+        extensions={"index": 1.3, "middle": 1.3, "ring": 0.8, "pinky": 0.8},
+        thumb_ext=0.2,
+    )
+    sm.update(peace_thumb_relaxed)
+    events = sm.update(peace_thumb_relaxed)
+    assert _names(events) == {("recenter", KEY_DOWN, "left")}
+
+    peace_thumb_open = make_screen_landmarks(
+        extensions={"index": 1.3, "middle": 1.3, "ring": 0.8, "pinky": 0.8},
+        thumb_ext=1.5,
+    )
+    assert sm.update(peace_thumb_open) == []
+
+
+def test_extension_combo_requires_ring_and_pinky_curled(
+    make_screen_landmarks: Callable[..., np.ndarray],
+) -> None:
+    sm = GestureStateMachine("right", {"recenter": Settings().gestures.right_hand["recenter"]})
+    peace = make_screen_landmarks(
+        extensions={"index": 1.3, "middle": 1.3, "ring": 0.8, "pinky": 0.8}
+    )
+    sm.update(peace)
+    assert _names(sm.update(peace)) == {("recenter", KEY_DOWN, "right")}
+
+    ring_up = make_screen_landmarks(
+        extensions={"index": 1.3, "middle": 1.3, "ring": 1.3, "pinky": 0.8}
+    )
+    released = sm.update(ring_up)
+    assert _names(released) == {("recenter", KEY_UP, "right")}
+
+
+def test_ring_pinch_is_q_and_pinky_pinch_is_sneak(
+    make_landmarks: Callable[..., np.ndarray],
+) -> None:
     sm = GestureStateMachine("left", Settings().gestures.left_hand)
-    sneak_and_pinches = make_screen_landmarks(extensions={"ring": 0.8, "pinky": 0.8})
-    scale = float(np.linalg.norm(sneak_and_pinches[9] - sneak_and_pinches[0]))
-    sneak_and_pinches[4] = sneak_and_pinches[16] + np.array([0.20 * scale, 0.0, 0.0])
-    sm.update(sneak_and_pinches)
-    events = sm.update(sneak_and_pinches)
-    names = _names(events)
-    assert ("sneak", KEY_DOWN, "left") in names
-    assert ("throw_item", KEY_DOWN, "left") not in names
+    both = make_landmarks({"ring": 0.20, "pinky": 0.20})
+    sm.update(both)
+    events = sm.update(both)
+    assert _names(events) == {
+        ("throw_item", KEY_DOWN, "left"),
+        ("sneak", KEY_DOWN, "left"),
+    }
 
 
 def test_config_detector_swap_changes_behavior(

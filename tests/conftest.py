@@ -154,6 +154,7 @@ def make_screen_settings(**overrides: Any) -> Settings:
             "right_sensitivity": 5.0,
             "look_accel_exponent": 1.0,  # linear for tests
             "smoothing": 0.0,
+            "right_smoothing": 0.0,
             "look_filter": "ema",
         }
     }

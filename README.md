@@ -4,6 +4,24 @@ Real-time webcam gesture -> Minecraft keyboard/mouse controller. A Python pipeli
 
 **Note:** This project currently only supports **macOS** because it relies on AVFoundation and Quartz CGEvent.
 
+## The App
+
+`minecraft_cv` ships with a polished desktop app (PySide6). The camera feed is framed as a clean
+"painting" with a subtle glowing hand skeleton — no clutter drawn over your hands — while a
+dark-glass sidebar shows every key mapping lighting up live as you gesture, your WASD / look
+state, per-hand tracking health, and Start / Go-Live / Calibrate controls. It opens in safe
+**Dry-Run** (no real input) by default.
+
+```bash
+pip install -e .      # pulls in PySide6 and the rest
+python main.py        # opens the app
+```
+
+<!-- TODO: add docs/demo.gif here — a short clip of the app in action -->
+<!-- ![minecraft_cv desktop app](docs/demo.gif) -->
+
+Prefer the headless / OpenCV-overlay controller? See `mcv run` under **Quick Start** below.
+
 ## Prerequisites
 - macOS 13+
 - Python 3.11+
@@ -21,12 +39,15 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
-Easy launcher:
+Launch the desktop app (recommended):
 ```bash
 .venv/bin/python main.py
+# or:
+.venv/bin/python -m minecraft_cv.cli ui
 ```
-Press `Enter` for the default `Y` answers. The launcher can run real input, show the
-camera overlay while playing, and do quick setup if palm-normal calibration is missing.
+The app opens in Dry-Run. Click **Go Live** to emit real input (you'll be prompted to grant
+Accessibility if needed), **Calibrate** to recenter the joysticks at your hand's rest pose, and
+**Pin** to keep the window above Minecraft.
 
 Check if your camera and permissions are set up correctly:
 ```bash
@@ -38,16 +59,6 @@ Run in dry-run mode (does not emit OS input, shows camera overlay):
 .venv/bin/python -m minecraft_cv.cli run --no-input --debug-overlay
 ```
 
-Quick one-pose setup before live gameplay:
-```bash
-.venv/bin/python -m minecraft_cv.cli calibrate --quick-neutral --apply
-```
-
-Full palm-normal calibration if you want tuned sensitivity:
-```bash
-.venv/bin/python -m minecraft_cv.cli calibrate --apply
-```
-
 Run in live mode with the camera overlay while playing:
 ```bash
 .venv/bin/python -m minecraft_cv.cli run --input --debug-overlay
@@ -57,15 +68,11 @@ Run in live mode with the camera overlay while playing:
 
 Here is how you control the game using gestures with your hands:
 
-### 🎮 Calibrated Palm-Normal Thumbsticks
-Run `.venv/bin/python -m minecraft_cv.cli calibrate --quick-neutral --apply` before gameplay for the easiest setup. Dry-run overlay can launch before calibration with temporary first-visible-hand neutrals, but `mcv run --input` refuses to start until neutral values exist in `config.yaml`.
+### 🎮 Screen Joysticks
 
-*   **Movement (WASD) - Left Hand**: Palm-normal tilt drives movement from calibrated rest.
-    *   **Forward (`W`)**: Tilt the palm normal down.
-    *   **Back (`S`)**: Tilt the palm normal up.
-    *   **Left (`A`)**: Tilt the palm normal left.
-    *   **Right (`D`)**: Tilt the palm normal right.
-*   **Camera Look (Mouse Move) - Right Hand**: The right palm normal uses the same `x/y` axes for look. Output is zero inside the calibrated deadzone and scales linearly as the palm normal tilts farther from neutral.
+*   **Movement (WASD) - Left Hand**: Move your left hand away from its neutral anchor to hold `W/A/S/D`.
+*   **Camera Look / Cursor - Right Hand**: The right thumb tip is treated like the mouse. Each frame's thumb movement becomes the mouse movement directly, with no right-hand deadzone or velocity hold. Tune the gain with `joystick.right_sensitivity` in `config.yaml`; the project default is `40.0`.
+*   **Relocalize / mouse-lift clutch**: Hold a peace sign (**Index + Middle** extended, **Ring + Pinky** curled). While held, that hand resets the thumb cursor point and the right hand sends no look movement.
 
 ---
 
@@ -75,8 +82,8 @@ All actions are holds. A quick hold/release acts like a tap in Minecraft.
 *   **Jump (`Space`)**: Pinch **Thumb** to **Index Finger**.
 *   **Inventory (`E`)**: Pinch **Thumb** to **Middle Finger**.
 *   **Throw Item (`Q`)**: Pinch **Thumb** to **Ring Finger**.
-*   **Switch Offhand (`F`)**: Pinch **Thumb** to **Pinky Finger**.
-*   **Sneak (`Shift`)**: Curl **Ring + Pinky** on the left hand. This suppresses the left ring/pinky pinches while held, but index/middle pinches remain available.
+*   **Sneak (`Shift`)**: Pinch **Thumb** to **Pinky Finger**.
+*   **Relocalize movement**: Peace sign (**Index + Middle** extended, **Ring + Pinky** curled).
 
 ---
 
@@ -86,12 +93,12 @@ Triggered by pinching your thumb to specific fingertips:
 *   **Use/Place (`Right Click`)**: Pinch **Thumb** to **Middle Finger**.
 *   **Hotbar Scroll Up (`Scroll Up`)**: Pinch **Thumb** to **Ring Finger**.
 *   **Hotbar Scroll Down (`Scroll Down`)**: Pinch **Thumb** to **Pinky Finger**.
-*   **Sprint (`Ctrl`)**: Curl **Ring + Pinky** on the right hand. This suppresses right ring/pinky hotbar pinches while held, but attack/use remain available.
+*   **Relocalize look / cursor clutch**: Peace sign (**Index + Middle** extended, **Ring + Pinky** curled). The right hand sends no look motion while this is held.
 
 ---
 
-### 💼 Special Modes
-The older two-open-palms inventory cursor mode is disabled by default because open palms are now the neutral gameplay pose. It remains available in configuration for experiments, but the default inventory action is the left-hand thumb-to-middle pinch (`E` hold).
+### 💼 Inventory
+There is no separate inventory control mode. The left-hand thumb-to-middle pinch holds `E`, and right-hand look/cursor motion plus click holds continue to work while Minecraft's inventory UI is open.
 
 ## Commands
 
@@ -106,7 +113,7 @@ The older two-open-palms inventory cursor mode is disabled by default because op
 
 ## Status
 
-Fully implemented: calibrated palm-normal virtual thumbsticks (LH -> WASD, RH -> mouse look), detector-backed hold gestures for both hands, pinch/curl-combo detectors with suppression, Schmitt triggers, hotbar gestures, sprint-via-velocity, and optional legacy inventory cursor mode.
+Fully implemented: screen-space movement joystick (left hand), thumb-tip look/cursor control (right hand), detector-backed hold gestures for both hands, pinch/curl-combo detectors with suppression, Schmitt triggers, hotbar gestures, relocalization, and smooth continuous mouse emission.
 
 ## Safety Invariants
 

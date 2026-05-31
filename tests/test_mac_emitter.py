@@ -87,8 +87,14 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, trusted: bool = True) -> 
     # Quartz
     quartz = ModuleType("Quartz")
 
-    def _create_event(_a: Any, etype: Any, pos: Any, _b: Any) -> dict[str, Any]:
-        return {"type": etype, "pos": pos, "fields": {}}
+    def _create_event(_a: Any, etype: Any, pos: Any, button: Any) -> dict[str, Any]:
+        return {"type": etype, "pos": pos, "button": button, "fields": {}}
+
+    def _create_generic_event(_a: Any) -> dict[str, Any]:
+        return {"type": "generic", "pos": (123.0, 456.0), "fields": {}}
+
+    def _get_location(_event: dict[str, Any]) -> tuple[float, float]:
+        return (123.0, 456.0)
 
     def _set_field(event: dict[str, Any], field: Any, value: int) -> None:
         event["fields"][field] = value
@@ -97,6 +103,8 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, trusted: bool = True) -> 
         rec.posted.append(event)
 
     quartz.CGEventCreateMouseEvent = _create_event  # type: ignore[attr-defined]
+    quartz.CGEventCreate = _create_generic_event  # type: ignore[attr-defined]
+    quartz.CGEventGetLocation = _get_location  # type: ignore[attr-defined]
     quartz.CGEventSetIntegerValueField = _set_field  # type: ignore[attr-defined]
     quartz.CGEventPost = _post  # type: ignore[attr-defined]
     quartz.CGMainDisplayID = lambda: 1  # type: ignore[attr-defined]
@@ -104,6 +112,14 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, trusted: bool = True) -> 
     quartz.CGDisplayPixelsHigh = lambda _d: 800  # type: ignore[attr-defined]
     quartz.kCGEventMouseMoved = "mouseMoved"  # type: ignore[attr-defined]
     quartz.kCGMouseButtonLeft = "btnLeft"  # type: ignore[attr-defined]
+    quartz.kCGMouseButtonRight = "btnRight"  # type: ignore[attr-defined]
+    quartz.kCGMouseButtonCenter = "btnCenter"  # type: ignore[attr-defined]
+    quartz.kCGEventLeftMouseDown = "leftDown"  # type: ignore[attr-defined]
+    quartz.kCGEventLeftMouseUp = "leftUp"  # type: ignore[attr-defined]
+    quartz.kCGEventRightMouseDown = "rightDown"  # type: ignore[attr-defined]
+    quartz.kCGEventRightMouseUp = "rightUp"  # type: ignore[attr-defined]
+    quartz.kCGEventOtherMouseDown = "otherDown"  # type: ignore[attr-defined]
+    quartz.kCGEventOtherMouseUp = "otherUp"  # type: ignore[attr-defined]
     quartz.kCGMouseEventDeltaX = "dX"  # type: ignore[attr-defined]
     quartz.kCGMouseEventDeltaY = "dY"  # type: ignore[attr-defined]
     quartz.kCGHIDEventTap = "hid"  # type: ignore[attr-defined]
@@ -128,7 +144,10 @@ def emitter_and_recorder(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-un
     rec = _install_fakes(monkeypatch)
     from minecraft_cv.input.mac_emitter import MacInputEmitter
 
-    em = MacInputEmitter(mouse_delta_scale=10.0, key_repeat_guard_ms=10_000.0)
+    em = MacInputEmitter(
+        mouse_delta_scale=10.0,
+        key_repeat_guard_ms=10_000.0,
+    )
     return em, rec
 
 
@@ -149,12 +168,12 @@ def test_key_down_is_deduplicated(emitter_and_recorder) -> None:  # type: ignore
     assert [c for c in rec.kbd if c[0] == "press"] == [("press", "K.shift")]
 
 
-def test_mouse_button_routed_to_mouse_controller(emitter_and_recorder) -> None:  # type: ignore[no-untyped-def]
+def test_mouse_button_routed_to_quartz_at_current_position(emitter_and_recorder) -> None:  # type: ignore[no-untyped-def]
     em, rec = emitter_and_recorder
     em.key_down("mouse_left")
     em.key_up("mouse_left")
-    assert ("press", "B.left") in rec.mouse
-    assert ("release", "B.left") in rec.mouse
+    assert [event["type"] for event in rec.posted] == ["leftDown", "leftUp"]
+    assert [event["pos"] for event in rec.posted] == [(123.0, 456.0), (123.0, 456.0)]
 
 
 def test_key_tap_presses_then_releases(emitter_and_recorder) -> None:  # type: ignore[no-untyped-def]
@@ -172,7 +191,7 @@ def test_release_all_flushes_keyboard_and_mouse(emitter_and_recorder) -> None:  
     em.key_down("mouse_left")
     em.release_all()
     assert ("release", "K.space") in rec.kbd
-    assert ("release", "B.left") in rec.mouse
+    assert any(event["type"] == "leftUp" for event in rec.posted)
     assert em.held_keys == frozenset()
 
 
@@ -185,6 +204,7 @@ def test_relative_move_accumulates_subpixel_then_posts(emitter_and_recorder) -> 
     assert rec.posted == []
     em.mouse_move(0.05, 0.0)  # +0.5 px -> 1.0 px -> posts deltaX == 1
     assert len(rec.posted) == 1
+    assert rec.posted[0]["pos"] == (124.0, 456.0)
     assert rec.posted[0]["fields"]["dX"] == 1
 
 
@@ -251,8 +271,8 @@ def test_pinch_sequence_drives_clean_down_up_no_stuck_key(emitter_and_recorder) 
     drive(0.25)  # still in hysteresis band -> no change
     drive(0.5)   # release
     drive(0.5)   # release (debounce)
-    presses = [c for c in rec.mouse if c == ("press", "B.left")]
-    releases = [c for c in rec.mouse if c == ("release", "B.left")]
+    presses = [c for c in rec.posted if c["type"] == "leftDown"]
+    releases = [c for c in rec.posted if c["type"] == "leftUp"]
     assert len(presses) == 1
     assert len(releases) == 1
     assert em.held_keys == frozenset()
@@ -278,7 +298,7 @@ def test_tracking_loss_reset_flushes_held_button(emitter_and_recorder) -> None: 
     # Tracking lost: the machine's reset emits KEY_UP, which the emitter must honor.
     for _ in sm.reset():
         em.key_up("mouse_left")
-    assert ("release", "B.left") in rec.mouse
+    assert any(event["type"] == "leftUp" for event in rec.posted)
     assert em.held_keys == frozenset()
 
 
@@ -295,4 +315,7 @@ def test_context_manager_releases_on_exit(emitter_and_recorder) -> None:  # type
 def test_pinch_config_upholds_release_gt_engage() -> None:
     """The emitter only ever sees clean transitions because T_release > T_engage holds."""
     for name, spec in Settings().gestures.right_hand.items():
-        assert spec.t_release > spec.t_engage, name
+        if spec.detector == "extension_combo":
+            assert spec.t_engage > spec.t_release, name
+        else:
+            assert spec.t_release > spec.t_engage, name

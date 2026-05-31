@@ -55,15 +55,18 @@ class InputEmitter(ABC):
         """Emit a relative mouse-look delta in screen pixels (camera rotation)."""
         self._emit_mouse_move(dx, dy)
 
+    def mouse_stop(self) -> None:
+        """Stop any backend-maintained continuous mouse-look motion."""
+        self._emit_mouse_stop()
+
     def mouse_move_abs(self, x: float, y: float) -> None:
-        """Warp the cursor to an absolute normalized screen position (inventory mode).
+        """Warp the cursor to an absolute normalized screen position.
 
         Args:
             x: Target screen x in ``[0, 1]`` (0 = left edge, 1 = right edge).
             y: Target screen y in ``[0, 1]`` (0 = top edge, 1 = bottom edge).
 
-        Used only in inventory mode, where the cursor must move freely over the GUI without
-        rotating the camera. Backends scale the normalized coords to the main display size.
+        Backends scale the normalized coords to the main display size.
         """
         self._emit_mouse_move_abs(x, y)
 
@@ -75,15 +78,15 @@ class InputEmitter(ABC):
     def key_tap(self, key: str) -> None:
         """Emit a momentary key tap (down + immediate up). Not tracked in held_keys.
 
-        Used for one-shot actions like opening inventory (E), throwing items (Q),
-        or switching offhand (F) where the gesture maps to a single key press
-        rather than a hold.
+        Used for one-shot actions where the gesture maps to a single key press rather than
+        a hold.
         """
         self._emit_key_down(key)
         self._emit_key_up(key)
 
     def release_all(self) -> None:
         """Release every currently-held key/button. The OS-level fail-safe backstop."""
+        self.mouse_stop()
         for key, count in sorted(self._held_keys.items()):
             if count > 0:
                 self._emit_key_up(key)
@@ -103,6 +106,10 @@ class InputEmitter(ABC):
 
     @abstractmethod
     def _emit_mouse_move(self, dx: float, dy: float) -> None: ...
+
+    def _emit_mouse_stop(self) -> None:
+        """Optional backend hook for clearing backend mouse-motion state."""
+        return None
 
     @abstractmethod
     def _emit_mouse_move_abs(self, x: float, y: float) -> None: ...
@@ -132,6 +139,9 @@ class NullEmitter(InputEmitter):
 
     def _emit_mouse_move(self, dx: float, dy: float) -> None:
         self.log.append(("mouse_move", f"{dx:.6f}", f"{dy:.6f}"))
+
+    def _emit_mouse_stop(self) -> None:
+        self.log.append(("mouse_stop",))
 
     def _emit_mouse_move_abs(self, x: float, y: float) -> None:
         self.log.append(("mouse_move_abs", f"{x:.6f}", f"{y:.6f}"))

@@ -1,19 +1,30 @@
+"""Screen-space joystick signals and deadzone processing."""
+
 from __future__ import annotations
 
 import numpy as np
 
+THUMB_TIP = 4
+
+
 def screen_mcp_centroid(landmarks: np.ndarray) -> np.ndarray:
     """Return the (x, y) centroid of the palm MCP joints (index, middle, ring, pinky).
-    
+
     This acts as a stable tracking point that feels natural to move across the screen.
     Uses landmarks 5, 9, 13, 17.
     """
     mcps = landmarks[[5, 9, 13, 17], :2]
     return np.mean(mcps, axis=0)
 
+
+def screen_thumb_tip(landmarks: np.ndarray) -> np.ndarray:
+    """Return the right-hand cursor/look signal from the thumb tip."""
+    return np.asarray(landmarks[THUMB_TIP, :2], dtype=np.float64)
+
+
 class ScreenJoystick:
     """Absolute screen-space joystick with zero calibration.
-    
+
     The first time this joystick receives a signal (if `fixed_neutral` is None),
     it permanently anchors its `_neutral` center to that exact `(x, y)` position.
     If `fixed_neutral` is provided, the anchor is permanently set to those coordinates.
@@ -27,6 +38,7 @@ class ScreenJoystick:
         smoothing: float,
         fixed_neutral: tuple[float, float] | None = None,
     ) -> None:
+        """Create a screen-space joystick with optional fixed neutral coordinates."""
         self.deadzone = deadzone
         self.sensitivity_val = sensitivity
         self.smoothing = smoothing

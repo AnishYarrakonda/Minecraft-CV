@@ -1,10 +1,10 @@
 """Config-driven gesture detector registry.
 
 This module lets the pipeline resolve both hands through the same state-machine surface. Each
-gesture config names a detector implementation (currently ``pinch``, ``curl_only``, or
-``curl_combo``), its thresholds, mode, and optional conflict group. The pipeline only sees
-logical gesture events; changing which detector drives a binding is a config/model change rather
-than a pipeline branch.
+gesture config names a detector implementation (currently ``pinch``, ``curl_only``,
+``curl_combo``, or ``extension_combo``), its thresholds, mode, and optional conflict group.
+The pipeline only sees logical gesture events; changing which detector drives a binding is a
+config/model change rather than a pipeline branch.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class GestureDetectorSpec(Protocol):
 
     @property
     def detector(self) -> str:
-        """Detector name, e.g. ``"pinch"``, ``"curl_only"``, or ``"curl_combo"``."""
+        """Detector name, e.g. ``"pinch"``, ``"curl_combo"``, or ``"extension_combo"``."""
 
     @property
     def finger(self) -> str:
@@ -64,6 +64,10 @@ class GestureDetectorSpec(Protocol):
     @property
     def curl_fingers(self) -> tuple[str, ...]:
         """For ``curl_combo``, every listed finger must remain curled."""
+
+    @property
+    def extension_fingers(self) -> tuple[str, ...]:
+        """For ``extension_combo``, every listed finger must remain extended."""
 
     @property
     def conflict_group(self) -> str | None:
@@ -105,10 +109,24 @@ class _DetectorState:
                 fs = finger_extensions(landmarks)
             fingers = self.spec.curl_fingers or (self.spec.finger,)
             return max(float(getattr(fs, _FINGER_FIELDS[finger])) for finger in fingers)
+        if self.spec.detector == "extension_combo":
+            if fs is None:
+                fs = finger_extensions(landmarks)
+            fingers = self.spec.extension_fingers or (self.spec.finger,)
+            # Convert the high-is-engaged extension signal into the lower-is-engaged
+            # convention used by SchmittTrigger.
+            return -min(float(getattr(fs, _FINGER_FIELDS[finger])) for finger in fingers)
         raise ValueError(f"Unsupported gesture detector: {self.spec.detector!r}")
 
     def gate_open(self, fs: FingerState | None) -> bool:
         """Return whether non-primary conditions allow this detector to engage/hold."""
+        if self.spec.detector == "extension_combo":
+            if fs is None:
+                return False
+            for finger in self.spec.curl_fingers:
+                if float(getattr(fs, _FINGER_FIELDS[finger])) >= self.spec.t_release:
+                    return False
+            return True
         if self.spec.detector not in ("curl_only", "curl_combo"):
             return True
         if fs is None:
@@ -157,6 +175,10 @@ class _DetectorState:
         """Number of fingers this detector requires curled; used as tie-break specificity."""
         if self.spec.detector == "curl_combo":
             return len(self.spec.curl_fingers or (self.spec.finger,))
+        if self.spec.detector == "extension_combo":
+            return len(self.spec.extension_fingers or (self.spec.finger,)) + len(
+                self.spec.curl_fingers
+            )
         return 1
 
     @property
@@ -203,13 +225,33 @@ class GestureStateMachine:
                     raise ValueError(
                         f"Curl-combo gesture {name!r} targets unsupported fingers {bad!r}"
                     )
+            if spec.detector == "extension_combo":
+                extension_fingers = spec.extension_fingers or (spec.finger,)
+                bad_extension = [
+                    finger for finger in extension_fingers if finger not in _FINGER_FIELDS
+                ]
+                bad_curl = [
+                    finger
+                    for finger in spec.curl_fingers
+                    if finger not in _FINGER_FIELDS or finger == "thumb"
+                ]
+                if bad_extension or bad_curl:
+                    raise ValueError(
+                        f"Extension-combo gesture {name!r} has unsupported fingers: "
+                        f"extend={bad_extension!r} curl={bad_curl!r}"
+                    )
+            trigger_engage = spec.t_engage
+            trigger_release = spec.t_release
+            if spec.detector == "extension_combo":
+                trigger_engage = -spec.t_engage
+                trigger_release = -spec.t_release
             self._detectors.append(
                 _DetectorState(
                     name=name,
                     spec=spec,
                     trigger=SchmittTrigger(
-                        t_engage=spec.t_engage,
-                        t_release=spec.t_release,
+                        t_engage=trigger_engage,
+                        t_release=trigger_release,
                     ),
                 )
             )

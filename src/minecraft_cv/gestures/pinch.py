@@ -5,9 +5,8 @@ Schmitt trigger per configured gesture. Distances are computed once per frame wi
 vectorized NumPy call (no Python loop over landmarks) and normalized by hand scale so the
 thresholds are camera-distance invariant.
 
-MVP gestures (per ``.claude/rules/gestures.md``): Left hand jump (thumb->index) + sneak
-(thumb->middle); Right hand attack (thumb->index) + use (thumb->middle). Ring/pinky hotbar
-and the full-fist inventory mode switch are V2.
+MVP gestures (per ``.claude/rules/gestures.md``): Left hand jump (thumb->index) and
+right hand attack/use. The current app uses the detector registry for the full mapping.
 """
 
 from __future__ import annotations

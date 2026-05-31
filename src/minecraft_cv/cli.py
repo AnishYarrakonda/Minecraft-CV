@@ -42,7 +42,8 @@ def main(argv: list[str] | None = None) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print("Usage: mcv <command> [args...]")
         print("\nCommands:")
-        print("  run        Run the live gesture controller")
+        print("  ui         Launch the polished desktop app")
+        print("  run        Run the live gesture controller (headless / cv2 overlay)")
         print("  analyze    Offline clip analysis")
         print("  bench      Benchmark tracking backend latency")
         print("  doctor     Check system permissions and config")
@@ -52,7 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     cmd = argv[0]
     sub_argv = argv[1:]
 
-    if cmd == "run":
+    if cmd == "ui":
+        return main_ui(sub_argv)
+    elif cmd == "run":
         return main_run(sub_argv)
     elif cmd == "analyze":
         return main_analyze(sub_argv)
@@ -107,20 +110,20 @@ def main_gestures(argv: list[str] | None = None) -> int:
     print("=== minecraft_cv Gesture Reference ===")
     print("\n[Screen Joysticks]")
     print("  Left hand  -> WASD movement (8 slices)")
-    print("  Right hand -> Mouse look (analog)")
+    print("  Right thumb -> Direct mouse/cursor movement, no deadzone")
     print("\n[Left Hand - Actions]")
     print("  Index Pinch  -> Jump (Space)")
     print("  Middle Pinch -> Inventory (E)")
     print("  Ring Pinch   -> Throw Item (Q)")
-    print("  Pinky Pinch  -> Swap Offhand (F)")
-    print("  Ring+Pinky Curl -> Sneak (Shift)")
+    print("  Pinky Pinch  -> Sneak (Shift)")
+    print("  Peace Sign   -> Relocalize movement")
     print("\n[Right Hand - Holds]")
     print("  Index Pinch  -> Attack/Mine (Left Click)")
     print("  Middle Pinch -> Use/Place (Right Click)")
     print("  Ring Pinch   -> Hotbar Scroll Up")
     print("  Pinky Pinch  -> Hotbar Scroll Down")
-    print("  Ring+Pinky Curl -> Sprint (Ctrl)")
-    print("\nOpen palms are neutral; legacy inventory mode is disabled by default.")
+    print("  Peace Sign   -> Reset thumb cursor point; held peace clutches mouse output")
+    print("\nOpen hands are neutral; there is no modal inventory control mode.")
     return 0
 
 
@@ -134,7 +137,15 @@ def main_run(argv: list[str] | None = None) -> int:
     group.add_argument(
         "--no-input", action="store_true", help="force dry-run (NullEmitter); the default"
     )
-    p.add_argument("--debug-overlay", action="store_true", help="show the OpenCV debug window")
+    overlay_group = p.add_mutually_exclusive_group()
+    overlay_group.add_argument(
+        "--debug-overlay", action="store_true", help="show the OpenCV debug window"
+    )
+    overlay_group.add_argument(
+        "--no-debug-overlay",
+        action="store_true",
+        help="hide the OpenCV debug window even if config enables it",
+    )
     p.add_argument("--clip", help="run on a recorded clip instead of the live camera")
     args = p.parse_args(argv)
 
@@ -145,6 +156,8 @@ def main_run(argv: list[str] | None = None) -> int:
         overrides["input"]["enabled"] = False
     if args.debug_overlay:
         overrides["debug"]["overlay"] = True
+    if args.no_debug_overlay:
+        overrides["debug"]["overlay"] = False
     settings = _load_settings(args.config, overrides)
 
     from minecraft_cv.pipeline import run_pipeline
@@ -171,6 +184,34 @@ def main_run(argv: list[str] | None = None) -> int:
     return 0
 
 
+# --- mcv ui -------------------------------------------------------------------
+_UI_INSTALL_HINT = (
+    "[mcv ui] The desktop app needs PySide6, which is not installed.\n"
+    "         Install the project (pulls in PySide6):  pip install -e .\n"
+    "         or just PySide6:                         pip install PySide6"
+)
+
+
+def main_ui(argv: list[str] | None = None) -> int:
+    """Launch the polished PySide6 desktop app (camera + live HUD). Defaults to Dry-Run."""
+    p = argparse.ArgumentParser(prog="mcv ui", description="Launch the desktop app.")
+    _add_config_arg(p)
+    p.add_argument("--clip", help="drive the app from a recorded clip instead of the camera")
+    args = p.parse_args(argv)
+    settings = _load_settings(args.config)
+
+    try:
+        from minecraft_cv.ui.app import run_app
+    except ImportError:
+        print(_UI_INSTALL_HINT, file=sys.stderr)
+        return 1
+
+    source = None
+    if args.clip:
+        from minecraft_cv.capture.source import ClipSource
+
+        source = ClipSource(args.clip)
+    return run_app(settings, source=source)
 
 
 

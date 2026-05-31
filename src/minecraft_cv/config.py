@@ -21,7 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 FingerName = Literal["index", "middle", "ring", "pinky", "fist"]
 DetectorFingerName = Literal["thumb", "index", "middle", "ring", "pinky"]
 CurlFingerName = Literal["index", "middle", "ring", "pinky"]
-GestureDetectorName = Literal["pinch", "curl_only", "curl_combo"]
+GestureDetectorName = Literal["pinch", "curl_only", "curl_combo", "extension_combo"]
 GestureMode = Literal["hold", "toggle"]
 Anchor = Literal["wrist", "middle_mcp"]
 JoystickMode = Literal["palm_tilt", "palm_normal", "wrist_rotation"]
@@ -124,7 +124,7 @@ class ExtensionThresholds(BaseModel):
         t_release: Extension ratio below which it releases (KEY_UP). Must be
             strictly less than ``t_engage`` (inverted Schmitt band for extension).
         pulse: If True, this gesture fires a single key tap on engage rather than
-            a sustained hold. Used for toggle/one-shot actions (E, Q, F).
+            a sustained hold. Used for toggle/one-shot actions.
     """
 
     model_config = {"extra": "forbid"}
@@ -149,11 +149,13 @@ class GestureDetectorSettings(BaseModel):
     """Config-driven gesture detector entry.
 
     The virtual dual-thumbstick rewrite treats every discrete gesture as detector-backed.
-    ``pinch``, ``curl_only``, and ``curl_combo`` all use lower-is-engaged Schmitt semantics:
-    ``t_release > t_engage``. For ``pinch`` the signal is normalized thumb-to-fingertip
-    distance; for ``curl_only`` it is the curled finger's extension ratio, gated by the listed
-    ``open_fingers`` staying open; for ``curl_combo`` it is the highest extension ratio among
-    all required curled fingers, so every listed finger must be down.
+    ``pinch``, ``curl_only``, and ``curl_combo`` use lower-is-engaged Schmitt semantics:
+    ``t_release > t_engage``. ``extension_combo`` is the opposite: every listed
+    ``extension_finger`` must extend above ``t_engage`` and release below ``t_release``.
+    For ``pinch`` the signal is normalized thumb-to-fingertip distance; for ``curl_only`` it
+    is the curled finger's extension ratio, gated by the listed ``open_fingers`` staying open;
+    for ``curl_combo`` it is the highest extension ratio among all required curled fingers, so
+    every listed finger must be down.
     """
 
     model_config = {"extra": "forbid"}
@@ -166,12 +168,19 @@ class GestureDetectorSettings(BaseModel):
     open_fingers: tuple[DetectorFingerName, ...] = ()
     open_threshold: float = Field(default=1.1, gt=0.0)
     curl_fingers: tuple[CurlFingerName, ...] = ()
+    extension_fingers: tuple[DetectorFingerName, ...] = ()
     conflict_group: str | None = None
     suppresses: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _check_detector(self) -> GestureDetectorSettings:
-        if not self.t_release > self.t_engage:
+        if self.detector == "extension_combo":
+            if not self.t_engage > self.t_release:
+                raise ValueError(
+                    f"t_engage ({self.t_engage}) must be strictly greater than "
+                    f"t_release ({self.t_release}) for extension_combo gestures."
+                )
+        elif not self.t_release > self.t_engage:
             raise ValueError(
                 f"t_release ({self.t_release}) must be strictly greater than "
                 f"t_engage ({self.t_engage}) for {self.detector!r} gestures."
@@ -189,22 +198,25 @@ class GestureDetectorSettings(BaseModel):
                 raise ValueError(
                     f"curl_combo fingers cannot also be required open: {sorted(overlap)}"
                 )
+        if self.detector == "extension_combo":
+            required = self.extension_fingers or (self.finger,)
+            overlap = set(required).intersection(self.curl_fingers)
+            if overlap:
+                raise ValueError(
+                    f"extension_combo fingers cannot also be required curled: {sorted(overlap)}"
+                )
         return self
 
 
 def _default_left_gestures() -> dict[str, ExtensionThresholds]:
     return {
         "jump": ExtensionThresholds(type="thumb_out", t_engage=1.2, t_release=0.9),
-        "sneak": ExtensionThresholds(type="index_only", t_engage=1.15, t_release=1.05),
-        "sprint": ExtensionThresholds(type="middle_only", t_engage=1.15, t_release=1.05),
+        "sneak": ExtensionThresholds(type="pinky_only", t_engage=1.15, t_release=1.05),
         "inventory": ExtensionThresholds(
             type="index_middle", t_engage=1.15, t_release=1.05, pulse=True
         ),
         "throw_item": ExtensionThresholds(
             type="ring_only", t_engage=1.15, t_release=1.05, pulse=True
-        ),
-        "switch_offhand": ExtensionThresholds(
-            type="pinky_only", t_engage=1.15, t_release=1.05, pulse=True
         ),
     }
 
@@ -229,28 +241,21 @@ def _default_left_detector_gestures() -> dict[str, GestureDetectorSettings]:
         "throw_item": GestureDetectorSettings(
             detector="pinch", finger="ring", t_engage=0.30, t_release=0.45
         ),
-        "switch_offhand": GestureDetectorSettings(
-            detector="pinch", finger="pinky", t_engage=0.30, t_release=0.45
-        ),
         "sneak": GestureDetectorSettings(
-            detector="curl_combo",
+            detector="pinch",
             finger="pinky",
-            t_engage=0.95,
-            t_release=1.05,
-            mode="hold",
-            curl_fingers=("ring", "pinky"),
-            suppresses=("throw_item", "switch_offhand"),
+            t_engage=0.30,
+            t_release=0.45,
         ),
         "recenter": GestureDetectorSettings(
-            detector="curl_combo",
-            finger="ring",
-            t_engage=0.95,
+            detector="extension_combo",
+            finger="index",
+            t_engage=1.15,
             t_release=1.05,
             mode="hold",
+            extension_fingers=("index", "middle"),
             curl_fingers=("ring", "pinky"),
-            open_fingers=("thumb", "index", "middle"),
-            open_threshold=1.1,
-            suppresses=("jump", "inventory", "throw_item", "switch_offhand"),
+            suppresses=("jump", "sneak", "inventory", "throw_item"),
         ),
     }
 
@@ -284,23 +289,14 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             t_release=0.45,
             conflict_group="hotbar_scroll",
         ),
-        "sprint": GestureDetectorSettings(
-            detector="curl_combo",
-            finger="ring",
-            t_engage=0.95,
-            t_release=1.05,
-            curl_fingers=("ring", "pinky"),
-            suppresses=("hotbar_next", "hotbar_prev"),
-        ),
         "recenter": GestureDetectorSettings(
-            detector="curl_combo",
-            finger="ring",
-            t_engage=0.95,
+            detector="extension_combo",
+            finger="index",
+            t_engage=1.15,
             t_release=1.05,
             mode="hold",
+            extension_fingers=("index", "middle"),
             curl_fingers=("ring", "pinky"),
-            open_fingers=("thumb", "index", "middle"),
-            open_threshold=1.1,
             suppresses=("attack", "use", "hotbar_next", "hotbar_prev"),
         ),
     }
@@ -326,11 +322,13 @@ class JoystickSettings(BaseModel):
 
     deadzone: float = Field(default=0.04, ge=0.0)
     left_sensitivity: float = Field(default=5.0, gt=0.0)
-    right_sensitivity: float = Field(default=5.0, gt=0.0)
-    look_accel_exponent: float = Field(default=1.6, gt=0.0)
+    right_sensitivity: float = Field(default=40.0, gt=0.0)
+    look_accel_exponent: float = Field(default=1.25, gt=0.0)
     """Exponential ease-in exponent applied to the right-hand mouse-look output."""
     smoothing: float = Field(default=0.1, ge=0.0, lt=1.0)
     """EMA smoothing factor on the tracked position (0 = none, ->1 = heavy)."""
+    right_smoothing: float | None = Field(default=0.55, ge=0.0, lt=1.0)
+    """Optional right-hand-only EMA smoothing. Keeps mouse look steady without slowing WASD."""
     fixed_left_neutral: tuple[float, float] | None = Field(default=(0.25, 0.5))
     """Optional fixed screen-space anchor (x, y) for the left joystick (WASD)."""
     fixed_right_neutral: tuple[float, float] | None = Field(default=(0.75, 0.5))
@@ -338,31 +336,9 @@ class JoystickSettings(BaseModel):
 
     # --- Mouse-look smoothing ----------------------------------------------------------
     look_filter: Literal["ema", "one_euro"] = "one_euro"
-    one_euro_min_cutoff: float = Field(default=1.0, gt=0.0)
-    one_euro_beta: float = Field(default=0.007, ge=0.0)
+    one_euro_min_cutoff: float = Field(default=0.65, gt=0.0)
+    one_euro_beta: float = Field(default=0.035, ge=0.0)
     one_euro_d_cutoff: float = Field(default=1.0, gt=0.0)
-
-
-class SprintVelocitySettings(BaseModel):
-    """Depth-velocity Sprint trigger (Task 2).
-
-    A quick forward push of the left hand toward the camera engages Sprint (``Ctrl`` held
-    alongside ``W``); it holds while the hand stays forward and releases on retreat. Because
-    MediaPipe's ``z`` axis is the least reliable landmark coordinate, this is **disabled by
-    default**. Prefer the right-hand ring+pinky curl sprint gesture unless you are
-    experimenting with velocity sprint.
-    """
-
-    model_config = {"extra": "forbid"}
-
-    enabled: bool = False
-    v_sprint: float = Field(default=1.0, gt=0.0)
-    """Forward-velocity threshold in normalized-``z`` units per second to count toward engaging."""
-    trigger_frames: int = Field(default=3, ge=1)
-    """Consecutive above-threshold frames required to engage (the "over N frames" debounce)."""
-    release_margin: float = Field(default=0.02, ge=0.0)
-    """Normalized-``z`` hysteresis band: sprint releases once ``z`` retreats back above
-    ``neutral_z - release_margin``."""
 
 
 class InputSettings(BaseModel):
@@ -371,37 +347,10 @@ class InputSettings(BaseModel):
     model_config = {"extra": "forbid"}
 
     enabled: bool = False
-    mouse_delta_scale: float = Field(default=15.0, gt=0.0)
+    mouse_delta_scale: float = Field(default=58.0, gt=0.0)
+    """Multiplier from normalized thumb movement to relative mouse pixels."""
     scroll_repeat_rate_hz: float = Field(default=8.0, gt=0.0)
     key_repeat_guard_ms: float = Field(default=50.0, ge=0.0)
-
-
-class InventorySettings(BaseModel):
-    """Inventory-mode toggle + absolute-cursor parameters (V2).
-
-    Inventory mode is toggled by a deliberate two-hand pose (both palms fully open, held).
-    While active, WASD translation and relative mouse-look are paused; the right hand drives
-    the OS cursor in **absolute** screen coordinates and the right-hand pinches act as
-    left/right clicks (a held pinch is a click-and-drag).
-    """
-
-    model_config = {"extra": "forbid"}
-
-    enabled: bool = False
-    open_threshold: float = Field(default=1.1, gt=0.0)
-    """Finger extension ratio above which a finger counts as extended for the open-palm pose."""
-    thumb_open_threshold: float = Field(default=0.9, gt=0.0)
-    """Thumb lateral-extension ratio above which the thumb counts as open."""
-    hold_frames: int = Field(default=8, ge=1)
-    """Consecutive both-palms-open frames required before the mode toggles (debounce)."""
-    cooldown_frames: int = Field(default=20, ge=0)
-    """Minimum frames between successive toggles (prevents immediate re-toggle)."""
-    cursor_gain: float = Field(default=1.0, gt=0.0)
-    """Gain mapping normalized hand displacement to normalized screen displacement.
-
-    The right-hand anchor's frame position (already in ``[0, 1]``) is mapped to a screen
-    position about screen-center, scaled by this gain and clamped to ``[0, 1]``.
-    """
 
 
 class DebugSettings(BaseModel):
@@ -423,10 +372,8 @@ def _default_bindings() -> dict[str, str]:
         # Left-hand discrete gestures.
         "jump": "space",
         "sneak": "shift",
-        "sprint": "ctrl",
         "inventory": "e",
         "throw_item": "q",
-        "switch_offhand": "f",
         # Right-hand discrete gestures.
         "attack": "mouse_left",
         "use": "mouse_right",
@@ -469,9 +416,7 @@ class Settings(BaseSettings):
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
     gestures: GestureSettings = Field(default_factory=GestureSettings)
     joystick: JoystickSettings = Field(default_factory=JoystickSettings)
-    sprint: SprintVelocitySettings = Field(default_factory=SprintVelocitySettings)
     input: InputSettings = Field(default_factory=InputSettings)
-    inventory: InventorySettings = Field(default_factory=InventorySettings)
     bindings: dict[str, str] = Field(default_factory=_default_bindings)
     debug: DebugSettings = Field(default_factory=DebugSettings)
 
