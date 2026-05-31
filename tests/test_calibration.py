@@ -11,6 +11,7 @@ from minecraft_cv.calibration import (
     REACH_POSES,
     compute_calibration,
     compute_palm_normal_calibration,
+    compute_palm_normal_hand_calibration,
     load_config_data,
     merge_calibration,
     merge_palm_normal_calibration,
@@ -164,3 +165,89 @@ def test_save_load_roundtrip_is_atomic_and_valid(tmp_path: Path) -> None:
     settings = Settings.load(cfg)
     assert settings.joystick.deadzone_radius == r.joystick_overrides()["deadzone_radius"]
     assert settings.camera.index == 1
+
+
+# ---------------------------------------------------------------------------
+# Asymmetric (signed) gain tests
+# ---------------------------------------------------------------------------
+
+
+def _asymmetric_samples() -> dict[str, dict[str, np.ndarray]]:
+    """Samples where up-reach (back) is much smaller than down-reach (forward)."""
+    neutral = np.zeros((40, 2))
+    return {
+        hand: {
+            "neutral": neutral,
+            "up": np.array([[0.0, -0.08]]),    # small back reach
+            "down": np.array([[0.0, 0.30]]),   # large forward reach
+            "left": np.array([[-0.20, 0.0]]),
+            "right": np.array([[0.20, 0.0]]),
+        }
+        for hand in ("left", "right")
+    }
+
+
+def test_four_signed_gains_computed() -> None:
+    """compute_palm_normal_hand_calibration emits both sensitivity and sensitivity_neg."""
+    samples = _asymmetric_samples()["left"]
+    result = compute_palm_normal_hand_calibration(
+        samples["neutral"],
+        {p: samples.get(p, []) for p in ("up", "down", "left", "right")},
+        deadzone_floor=0.01,
+    )
+    assert len(result.sensitivity) == 2
+    assert len(result.sensitivity_neg) == 2
+
+
+def test_back_gain_exceeds_forward_gain_when_up_reach_smaller() -> None:
+    """When up-reach (back) is smaller than down-reach (forward), back_gain > forward_gain."""
+    samples = _asymmetric_samples()["left"]
+    result = compute_palm_normal_hand_calibration(
+        samples["neutral"],
+        {p: samples.get(p, []) for p in ("up", "down", "left", "right")},
+        deadzone_floor=0.01,
+    )
+    forward_gain = result.sensitivity[1]     # positive-y / forward
+    back_gain = result.sensitivity_neg[1]    # negative-y / back
+    assert back_gain > forward_gain, (
+        f"back_gain ({back_gain:.3f}) should exceed forward_gain ({forward_gain:.3f}) "
+        "when the back reach is smaller"
+    )
+
+
+def test_symmetric_reaches_produce_equal_gains() -> None:
+    """Equal up and down reach -> forward_gain ≈ back_gain."""
+    samples = {
+        "neutral": np.zeros((40, 2)),
+        "up": np.array([[0.0, -0.25]]),
+        "down": np.array([[0.0, 0.25]]),
+        "left": np.array([[-0.2, 0.0]]),
+        "right": np.array([[0.2, 0.0]]),
+    }
+    result = compute_palm_normal_hand_calibration(
+        samples["neutral"],
+        {p: samples[p] for p in ("up", "down", "left", "right")},
+        deadzone_floor=0.01,
+    )
+    assert result.sensitivity[1] == pytest.approx(result.sensitivity_neg[1], rel=1e-4)
+
+
+def test_joystick_overrides_serializes_sensitivity_neg() -> None:
+    """joystick_overrides() must include left_sensitivity_neg and right_sensitivity_neg."""
+    result = compute_palm_normal_calibration(_asymmetric_samples(), deadzone_floor=0.01)
+    overrides = result.joystick_overrides(mode="palm_tilt", block="tilt")
+    block = overrides["tilt"]
+    assert "left_sensitivity_neg" in block
+    assert "right_sensitivity_neg" in block
+    assert len(block["left_sensitivity_neg"]) == 2
+    assert len(block["right_sensitivity_neg"]) == 2
+
+
+def test_tilt_merge_with_sensitivity_neg_validates() -> None:
+    """Merged config including sensitivity_neg must validate through Settings."""
+    result = compute_palm_normal_calibration(_asymmetric_samples(), deadzone_floor=0.01)
+    merged = merge_tilt_calibration({}, result)
+    # Must not raise ValidationError
+    s = Settings(**merged)
+    assert s.joystick.tilt.left_sensitivity_neg is not None
+    assert s.joystick.tilt.right_sensitivity_neg is not None

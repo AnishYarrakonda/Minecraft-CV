@@ -308,6 +308,16 @@ class PalmNormalSettings(BaseModel):
     deadzone: float = Field(default=0.05, ge=0.0)
     left_sensitivity: tuple[float, float] = (2.0, 2.0)
     right_sensitivity: tuple[float, float] = (2.0, 2.0)
+    left_sensitivity_neg: tuple[float, float] | None = None
+    """Optional negative-direction per-axis gain for the left hand.
+
+    When ``None`` (default), the positive ``left_sensitivity`` is used for both directions
+    (symmetric). When set, negative-delta axes use this gain instead — allows the
+    geometrically-smaller back/left reach to be independently boosted.
+    """
+    right_sensitivity_neg: tuple[float, float] | None = None
+    """Optional negative-direction per-axis gain for the right hand. See ``left_sensitivity_neg``."""
+
 
 
 class TiltSettings(PalmNormalSettings):
@@ -374,6 +384,14 @@ class JoystickSettings(BaseModel):
     during this window; recentering (recenter macro) restarts calibration."""
     dynamic_deadzone_margin: float = Field(default=1.5, ge=0.0)
     """Multiplier on the measured resting-jitter radius added to the base deadzone."""
+
+    look_accel_exponent: float = Field(default=1.6, gt=0.0)
+    """Exponential ease-in exponent applied to the mouse-look output before the One-Euro filter.
+
+    ``exponent > 1`` produces gentle precise movement at small tilts and fast saturation at
+    large tilts (mitigates Gorilla Arm on the right hand). ``1.0`` is a linear pass-through
+    (off). Applied only to the look path; WASD stays digital.
+    """
 
     # --- Mouse-look smoothing (V2) -----------------------------------------------------
     look_filter: Literal["ema", "one_euro"] = "one_euro"

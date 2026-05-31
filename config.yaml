@@ -132,13 +132,14 @@ joystick:
   accel_exponent: 2.0
   anchor: wrist
   max_output: 1.0
-  smoothing: 0.6
+  smoothing: 0.4
   recenter_grace_frames: 3
-  cardinal_half_width: 35.0
+  cardinal_half_width: 40.0
   dynamic_deadzone: false
   calibration_frames: 150
   dynamic_deadzone_margin: 1.5
   look_filter: one_euro
+  look_accel_exponent: 1.6
   one_euro_min_cutoff: 1.0
   one_euro_beta: 0.007
   one_euro_d_cutoff: 1.0
@@ -156,7 +157,7 @@ sprint:
   release_margin: 0.02
 input:
   enabled: false
-  mouse_delta_scale: 15.0
+  mouse_delta_scale: 28.0
   scroll_repeat_rate_hz: 8
   key_repeat_guard_ms: 50
 bindings:

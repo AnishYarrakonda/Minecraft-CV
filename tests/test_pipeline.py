@@ -489,3 +489,115 @@ def test_pipeline_shutdown_on_camera_error() -> None:
 
         mock_shutdown.assert_called_once()
         assert source.released is True
+
+
+
+# ---------------------------------------------------------------------------
+# Cardinal-zone anti-drift + back (S) integration tests  (palm_tilt mode)
+# ---------------------------------------------------------------------------
+
+
+def _tilt_pipeline(emitter: NullEmitter) -> Pipeline:
+    from conftest import make_tilt_calibrated_settings
+
+    return Pipeline.from_settings(make_tilt_calibrated_settings(), emitter=emitter)
+
+
+def test_anti_drift_slightly_off_axis_forward_fires_only_w(
+    null_emitter: NullEmitter,
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    """Slightly-off-axis forward tilt -> only W, not W+D (the cardinal-zone anti-drift test)."""
+    from conftest import _build_tilt_landmarks
+
+    pipe = _tilt_pipeline(null_emitter)
+    # Neutral frame.
+    neutral_lm = _build_tilt_landmarks(tilt=(0.0, 0.0))
+    pipe.step([make_hand_result(neutral_lm, "Right")])
+
+    # Tilt mostly forward (+y) with a tiny rightward component — well within the cardinal zone.
+    # At half_width=35 the forward pure zone is ±55° from 90°. atan2(0.5, 0.05) ≈ 84° — inside.
+    off_axis_lm = _build_tilt_landmarks(tilt=(0.05, 0.5))
+    result = pipe.step([make_hand_result(off_axis_lm, "Right")])
+
+    assert "w" in result.wasd_held, "Forward tilt should press W"
+    assert "d" not in result.wasd_held, "Small x drift should NOT press D (anti-drift)"
+
+
+def test_lift_up_fires_s(
+    null_emitter: NullEmitter,
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    """Lifting the wrist (negative y tilt) fires S, not W."""
+    from conftest import _build_tilt_landmarks
+
+    pipe = _tilt_pipeline(null_emitter)
+    neutral_lm = _build_tilt_landmarks(tilt=(0.0, 0.0))
+    pipe.step([make_hand_result(neutral_lm, "Right")])
+
+    # Negative y tilt = knuckles rise above wrist = back (S).
+    up_lm = _build_tilt_landmarks(tilt=(0.0, -0.5))
+    result = pipe.step([make_hand_result(up_lm, "Right")])
+
+    assert "s" in result.wasd_held, "Lifting wrist should press S (back)"
+    assert "w" not in result.wasd_held, "Lifting wrist should not press W"
+
+
+# ---------------------------------------------------------------------------
+# StepResult debug fields
+# ---------------------------------------------------------------------------
+
+
+def test_step_result_carries_debug_fields(
+    null_emitter: NullEmitter,
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    """StepResult must expose the new debug fields after a normal step."""
+    from conftest import _build_tilt_landmarks, make_tilt_calibrated_settings
+
+    pipe = Pipeline.from_settings(make_tilt_calibrated_settings(), emitter=null_emitter)
+    lm = _build_tilt_landmarks(tilt=(0.0, 0.0))
+    result = pipe.step([make_hand_result(lm, "Right")])
+
+    assert result.left_neutral is not None
+    assert result.right_neutral is not None
+    assert isinstance(result.deadzone, float)
+    assert isinstance(result.cardinal_half_width, float)
+    assert result.left_status in ("normal", "stabilizing", "absent")
+    assert result.right_status in ("normal", "stabilizing", "absent")
+
+
+def test_step_result_absent_hand_has_absent_status(
+    null_emitter: NullEmitter,
+) -> None:
+    """When no hands are visible, both status fields should be 'absent'."""
+    from conftest import make_tilt_calibrated_settings
+
+    pipe = Pipeline.from_settings(make_tilt_calibrated_settings(), emitter=null_emitter)
+    result = pipe.step([])  # no hands
+    assert result.left_status == "absent"
+    assert result.right_status == "absent"
+
+
+def test_draw_overlay_does_not_raise(
+    null_emitter: NullEmitter,
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    """_draw_overlay must not raise on a realistic StepResult (smoke test)."""
+    import numpy as np
+
+    from conftest import _build_tilt_landmarks, make_tilt_calibrated_settings
+    from minecraft_cv.pipeline import _draw_overlay
+
+    pipe = Pipeline.from_settings(make_tilt_calibrated_settings(), emitter=null_emitter)
+    lm = _build_tilt_landmarks(tilt=(0.1, 0.2))
+    hr = make_hand_result(lm, "Right")
+    results = [hr]
+    step = pipe.step(results)
+
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    # Should not raise even with the full HUD; cv2 is mocked lazily.
+    try:
+        _draw_overlay(frame, results, step)
+    except ImportError:
+        pass  # cv2 not installed in the test env — skip the actual draw

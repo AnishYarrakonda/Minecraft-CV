@@ -45,7 +45,13 @@ def palm_normal_xy(landmarks: np.ndarray) -> np.ndarray:
 
 
 class PalmNormalJoystick:
-    """Per-axis linear deadzone joystick over calibrated palm-normal ``x``/``y``."""
+    """Per-axis linear deadzone joystick over calibrated palm-normal ``x``/``y``.
+
+    Supports optional asymmetric per-direction sensitivity via ``sensitivity_neg``.
+    When provided, negative delta on an axis uses the corresponding negative gain
+    instead of the positive one — this allows the geometrically-smaller "back" reach
+    to be amplified independently so it matches the effective travel of "forward".
+    """
 
     def __init__(
         self,
@@ -54,11 +60,23 @@ class PalmNormalJoystick:
         sensitivity: float | Sequence[float],
         max_output: float = 1.0,
         smoothing: float = 0.0,
+        sensitivity_neg: Sequence[float] | None = None,
     ) -> None:
         """Construct the joystick from calibrated values.
 
         ``neutral=None`` is reserved for dry-run preview. The first visible hand sample
         becomes a temporary neutral so the debug overlay can launch before calibration.
+
+        Args:
+            neutral: Calibrated ``(x, y)`` neutral palm-normal vector, or ``None`` for
+                uncalibrated dry-run preview.
+            deadzone: Per-axis linear deadzone half-width.
+            sensitivity: Positive-direction per-axis gain, scalar or ``(x, y)`` pair.
+            max_output: Output saturation magnitude (same units as the joystick output).
+            smoothing: EMA smoothing factor in ``[0, 1)``. ``0`` disables smoothing.
+            sensitivity_neg: Optional negative-direction per-axis gain ``(x, y)``.
+                When ``None`` (default), the positive ``sensitivity`` is used for both
+                directions (symmetric — identical to the original behavior).
         """
         self._configured_neutral = (
             None if neutral is None else np.asarray(neutral, dtype=np.float64)[:2].copy()
@@ -74,6 +92,15 @@ class PalmNormalJoystick:
         self.max_output = float(max_output)
         self.smoothing = float(smoothing)
         self._filtered: np.ndarray | None = None
+
+        # Asymmetric negative gain (None = symmetric, falls back to self.sensitivity)
+        if sensitivity_neg is None:
+            self.sensitivity_neg: np.ndarray | None = None
+        else:
+            sn = np.asarray(sensitivity_neg, dtype=np.float64)
+            if sn.ndim == 0:
+                sn = np.asarray([float(sn), float(sn)], dtype=np.float64)
+            self.sensitivity_neg = sn[:2].copy()
 
     @property
     def neutral(self) -> np.ndarray:
@@ -95,14 +122,25 @@ class PalmNormalJoystick:
         self._filtered = None
 
     def update(self, signal: np.ndarray) -> np.ndarray:
-        """Map a palm-normal ``(x, y)`` sample to per-axis linear output."""
+        """Map a palm-normal ``(x, y)`` sample to per-axis linear output.
+
+        If ``sensitivity_neg`` is set, the gain for each axis is chosen by the sign of
+        the delta: positive delta uses ``self.sensitivity``; negative delta uses
+        ``self.sensitivity_neg``.  This allows separate amplification of the
+        geometrically-smaller "back" / "left" reach.
+        """
         sig = np.asarray(signal, dtype=np.float64)[:2]
         smoothed = self._smooth(sig)
         if self._neutral is None:
             self._neutral = smoothed.copy()
             return self.zero()
         delta = smoothed - self._neutral
-        magnitude = np.maximum(np.abs(delta) - self.deadzone, 0.0) * self.sensitivity
+        # Choose per-axis gain by sign of delta (asymmetric mode) or use uniform gain.
+        if self.sensitivity_neg is not None:
+            gain = np.where(delta >= 0, self.sensitivity, self.sensitivity_neg)
+        else:
+            gain = self.sensitivity
+        magnitude = np.maximum(np.abs(delta) - self.deadzone, 0.0) * gain
         magnitude = np.minimum(magnitude, self.max_output)
         return np.asarray(np.sign(delta) * magnitude, dtype=np.float64)
 

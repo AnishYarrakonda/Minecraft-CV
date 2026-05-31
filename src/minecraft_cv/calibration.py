@@ -9,6 +9,9 @@ direction — and this module turns those samples into concrete settings:
     movement (the same idea as the dynamic deadzone, but baked into the static config).
   * **sensitivity** from the user's full physical reach, so output saturates exactly when the
     hand reaches its comfortable extent — mitigating Gorilla Arm without manual guessing.
+  * **sensitivity_neg** (new) — independent gain for the negative direction on each axis, so
+    the smaller "back" (S) reach gets its own boosted gain and produces effective travel
+    comparable to the larger "forward" reach.
 
 All positions are **normalized frame coordinates** (``[0, 1]`` in x/y), matching MediaPipe
 landmark / anchor space. The sample-collection loop lives in the CLI; the math here is pure and
@@ -66,11 +69,26 @@ class CalibrationResult:
 
 @dataclass(frozen=True)
 class PalmNormalHandCalibration:
-    """Calibrated palm-normal settings for one hand."""
+    """Calibrated palm-normal settings for one hand.
+
+    Attributes:
+        neutral: Resting ``(x, y)`` palm-normal vector.
+        deadzone: Per-axis linear deadzone half-width.
+        sensitivity: Positive-direction per-axis gain ``(x_gain, y_gain)``.
+            ``x_gain`` saturates rightward reach; ``y_gain`` saturates forward (down) reach.
+        sensitivity_neg: Negative-direction per-axis gain ``(x_gain, y_gain)``.
+            ``x_gain`` saturates leftward reach; ``y_gain`` saturates back (up) reach.
+            Independent from ``sensitivity`` so the geometrically-smaller back/left reach
+            can be amplified to match the effective travel of forward/right.
+        resting_jitter: 95th-percentile resting deviation from ``neutral``.
+        x_reach: Mean x-axis reach (averaged across left and right, for diagnostics).
+        y_reach: Mean y-axis reach (averaged across up and down, for diagnostics).
+    """
 
     neutral: tuple[float, float]
     deadzone: float
     sensitivity: tuple[float, float]
+    sensitivity_neg: tuple[float, float]
     resting_jitter: float
     x_reach: float
     y_reach: float
@@ -91,6 +109,9 @@ class PalmNormalCalibrationResult:
         The computed neutral/deadzone/sensitivity values are signal-agnostic, so the same
         result serializes for either the ``palm_normal`` mode (``block="palm_normal"``) or the
         ``palm_tilt`` mode (``mode="palm_tilt"``, ``block="tilt"``).
+
+        ``sensitivity_neg`` is written alongside ``sensitivity`` so the pipeline can apply
+        independent back/left gain without re-calibrating when the user later edits them.
         """
         return {
             "mode": mode,
@@ -100,6 +121,8 @@ class PalmNormalCalibrationResult:
                 "deadzone": round(max(self.left.deadzone, self.right.deadzone), 5),
                 "left_sensitivity": [round(v, 5) for v in self.left.sensitivity],
                 "right_sensitivity": [round(v, 5) for v in self.right.sensitivity],
+                "left_sensitivity_neg": [round(v, 5) for v in self.left.sensitivity_neg],
+                "right_sensitivity_neg": [round(v, 5) for v in self.right.sensitivity_neg],
             },
         }
 
@@ -184,7 +207,18 @@ def compute_palm_normal_hand_calibration(
     deadzone_floor: float = 0.01,
     max_sensitivity: float = 50.0,
 ) -> PalmNormalHandCalibration:
-    """Derive one hand's palm-normal neutral, deadzone, and per-axis sensitivity."""
+    """Derive one hand's palm-normal neutral, deadzone, and per-axis signed sensitivities.
+
+    Four independent gains are computed from the four cardinal poses:
+    - ``right_gain`` from the rightward reach  → ``sensitivity[0]`` (positive x).
+    - ``left_gain`` from the leftward reach    → ``sensitivity_neg[0]`` (negative x).
+    - ``forward_gain`` from the downward reach → ``sensitivity[1]`` (positive y / forward).
+    - ``back_gain`` from the upward reach      → ``sensitivity_neg[1]`` (negative y / back).
+
+    The "up/back" reach is geometrically smaller than the "down/forward" reach (knuckles
+    already sit above the wrist at rest), so ``back_gain`` is typically larger than
+    ``forward_gain``, giving the S key the same effective travel as W.
+    """
     neutral_arr = _as_xy(neutral_samples)
     if neutral_arr.shape[0] == 0:
         raise ValueError("Palm-normal calibration needs neutral samples for both hands.")
@@ -204,18 +238,25 @@ def compute_palm_normal_hand_calibration(
 
     right_reach = _reach("right", 0, 1.0)
     left_reach = _reach("left", 0, -1.0)
+    # tilt "down" pose (knuckles down) → forward/+y; "up" pose (knuckles up) → back/−y.
     down_reach = _reach("down", 1, 1.0)
     up_reach = _reach("up", 1, -1.0)
+
+    # Diagnostic averages (for display / old tests).
     x_reach = float(np.mean([left_reach, right_reach]))
     y_reach = float(np.mean([up_reach, down_reach]))
+
+    # Four independent signed gains.
+    right_gain = _axis_gain(right_reach, deadzone, max_sensitivity)
+    left_gain = _axis_gain(left_reach, deadzone, max_sensitivity)
+    forward_gain = _axis_gain(down_reach, deadzone, max_sensitivity)
+    back_gain = _axis_gain(up_reach, deadzone, max_sensitivity)
 
     return PalmNormalHandCalibration(
         neutral=(float(neutral[0]), float(neutral[1])),
         deadzone=float(deadzone),
-        sensitivity=(
-            _axis_gain(x_reach, deadzone, max_sensitivity),
-            _axis_gain(y_reach, deadzone, max_sensitivity),
-        ),
+        sensitivity=(right_gain, forward_gain),
+        sensitivity_neg=(left_gain, back_gain),
         resting_jitter=jitter,
         x_reach=x_reach,
         y_reach=y_reach,
