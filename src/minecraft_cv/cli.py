@@ -112,7 +112,7 @@ def main_gestures(argv: list[str] | None = None) -> int:
     print("  Left palm normal x/y  -> WASD movement")
     print("    right/left -> D/A, down/up -> W/S")
     print("  Right palm normal x/y -> Mouse look")
-    print("  Run `mcv calibrate --apply` before `mcv run`.")
+    print("  Run `mcv calibrate --apply` before `mcv run --input`.")
     print("\n[Left Hand - Actions]")
     print("  Index Pinch  -> Jump (Space)")
     print("  Middle Pinch -> Inventory (E)")
@@ -161,10 +161,33 @@ def main_run(argv: list[str] | None = None) -> int:
         source = ClipSource(args.clip)
 
     mode = "LIVE (emitting input)" if settings.input.enabled else "DRY-RUN (no input)"
-    print(f"[mcv-run] {mode}; overlay={settings.debug.overlay}; "
-          f"source={'clip:' + args.clip if args.clip else 'camera:' + str(settings.camera.index)}")
+    print(
+        f"[mcv-run] {mode}; overlay={settings.debug.overlay}; "
+        f"source={'clip:' + args.clip if args.clip else 'camera:' + str(settings.camera.index)}",
+        flush=True,
+    )
     try:
-        run_pipeline(settings, source=source)
+        palm_normal_missing = (
+            settings.joystick.mode == "palm_normal"
+            and (
+                settings.joystick.palm_normal.left_neutral is None
+                or settings.joystick.palm_normal.right_neutral is None
+            )
+        )
+        allow_uncalibrated_preview = palm_normal_missing and not settings.input.enabled
+        if allow_uncalibrated_preview:
+            print(
+                "[mcv-run] warning: palm-normal calibration is missing; dry-run will use "
+                "temporary first-visible-hand neutrals. Run `mcv calibrate --apply` before "
+                "`mcv run --input`.",
+                file=sys.stderr,
+                flush=True,
+            )
+        run_pipeline(
+            settings,
+            source=source,
+            allow_uncalibrated_palm_normal=allow_uncalibrated_preview,
+        )
     except KeyboardInterrupt:
         print("\n[mcv-run] interrupted; releasing all input.", file=sys.stderr)
     except (PermissionError, RuntimeError, FileNotFoundError, ValueError) as exc:

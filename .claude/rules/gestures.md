@@ -16,12 +16,27 @@ They share the same landmark stream but are completely independent state machine
 
 ## Spatial joysticks
 
-Each hand's **wrist (landmark 0)** or **middle MCP (landmark 9)** is the anchor point.
-Do NOT use the bounding-box center — pinching shifts it, corrupting the joystick vector.
+Two joystick modes exist. **`palm_normal` is the default** for gameplay; `wrist_rotation` is
+the legacy fallback.
+
+### palm_normal (default)
+
+Uses the **palm-plane normal vector** as the joystick signal. A calibration step (`mcv calibrate
+--apply`) stores each hand's resting normal; gameplay measures deviation from that neutral in
+`(x, y)` normal space. This is translation-invariant — moving closer to the camera or shifting
+in the chair doesn't drift the neutral.
+
+### wrist_rotation (legacy)
+
+Uses **wrist (landmark 0)** or **middle MCP (landmark 9)** XZ translation as the signal. Do NOT
+use the bounding-box center — pinching shifts it, corrupting the joystick vector. Requires
+`joystick.mode: wrist_rotation` in config.
+
+### Common behavior (both modes)
 
 ```
-NEUTRAL: pos inside deadzone sphere  → output (0, 0)
-ACTIVE:  pos outside deadzone sphere → output = (pos − deadzone_edge) * sensitivity
+NEUTRAL: signal inside deadzone sphere  → output (0, 0)
+ACTIVE:  signal outside deadzone sphere → output = (signal − deadzone_edge) * sensitivity
 ```
 
 - The deadzone is a **sphere** (not a box) so diagonal directions aren't biased.
@@ -30,6 +45,8 @@ ACTIVE:  pos outside deadzone sphere → output = (pos − deadzone_edge) * sens
   in-game camera/movement without requiring the user to travel far. This directly
   mitigates Gorilla Arm syndrome.
 - **Left hand** → WASD translation. **Right hand** → mouse look (camera rotation).
+- Mouse look output is filtered by a **One-Euro velocity-adaptive filter** (default) for
+  steady-at-rest + snappy-in-motion behavior. Configurable via `joystick.look_filter`.
 
 ### Cardinal zones
 

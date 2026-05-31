@@ -21,20 +21,29 @@ pip install -e ".[dev]"
 
 ## Quick Start
 
+Easy launcher:
+```bash
+.venv/bin/python main.py
+```
+
 Check if your camera and permissions are set up correctly:
 ```bash
-mcv doctor
+.venv/bin/python -m minecraft_cv.cli doctor
 ```
 
 Run in dry-run mode (does not emit OS input, shows camera overlay):
 ```bash
-mcv run --no-input --debug-overlay
+.venv/bin/python -m minecraft_cv.cli run --no-input --debug-overlay
+```
+
+Calibrate palm-normal controls before live gameplay:
+```bash
+.venv/bin/python -m minecraft_cv.cli calibrate --apply
 ```
 
 Run in live mode (controls your mouse and keyboard):
 ```bash
-mcv calibrate --apply
-mcv run --input
+.venv/bin/python -m minecraft_cv.cli run --input
 ```
 
 ## Gesture & Control Reference
@@ -42,7 +51,7 @@ mcv run --input
 Here is how you control the game using gestures with your hands:
 
 ### 🎮 Calibrated Palm-Normal Thumbsticks
-Run `mcv calibrate --apply` before gameplay. Palm-normal mode refuses to start until calibrated neutral values exist in `config.yaml`.
+Run `mcv calibrate --apply` before gameplay. Dry-run overlay can launch before calibration with temporary first-visible-hand neutrals, but `mcv run --input` refuses to start until calibrated neutral values exist in `config.yaml`.
 
 *   **Movement (WASD) - Left Hand**: Palm-normal tilt drives movement from calibrated rest.
     *   **Forward (`W`)**: Tilt the palm normal down.

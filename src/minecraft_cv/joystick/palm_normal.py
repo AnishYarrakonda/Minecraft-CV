@@ -49,15 +49,23 @@ class PalmNormalJoystick:
 
     def __init__(
         self,
-        neutral: Sequence[float],
+        neutral: Sequence[float] | None,
         deadzone: float,
         sensitivity: float | Sequence[float],
         max_output: float = 1.0,
         smoothing: float = 0.0,
     ) -> None:
-        """Construct the joystick from calibrated values."""
-        self._configured_neutral = np.asarray(neutral, dtype=np.float64)[:2].copy()
-        self._neutral = self._configured_neutral.copy()
+        """Construct the joystick from calibrated values.
+
+        ``neutral=None`` is reserved for dry-run preview. The first visible hand sample
+        becomes a temporary neutral so the debug overlay can launch before calibration.
+        """
+        self._configured_neutral = (
+            None if neutral is None else np.asarray(neutral, dtype=np.float64)[:2].copy()
+        )
+        self._neutral = (
+            None if self._configured_neutral is None else self._configured_neutral.copy()
+        )
         self.deadzone = float(deadzone)
         sens = np.asarray(sensitivity, dtype=np.float64)
         if sens.ndim == 0:
@@ -70,6 +78,8 @@ class PalmNormalJoystick:
     @property
     def neutral(self) -> np.ndarray:
         """Current calibrated neutral ``(x, y)`` palm-normal vector."""
+        if self._neutral is None:
+            return np.zeros(2, dtype=np.float64)
         return self._neutral
 
     def recenter(self, new_neutral: np.ndarray) -> None:
@@ -79,13 +89,18 @@ class PalmNormalJoystick:
 
     def reset_neutral(self) -> None:
         """Restore the configured neutral and clear filter history."""
-        self._neutral = self._configured_neutral.copy()
+        self._neutral = (
+            None if self._configured_neutral is None else self._configured_neutral.copy()
+        )
         self._filtered = None
 
     def update(self, signal: np.ndarray) -> np.ndarray:
         """Map a palm-normal ``(x, y)`` sample to per-axis linear output."""
         sig = np.asarray(signal, dtype=np.float64)[:2]
         smoothed = self._smooth(sig)
+        if self._neutral is None:
+            self._neutral = smoothed.copy()
+            return self.zero()
         delta = smoothed - self._neutral
         magnitude = np.maximum(np.abs(delta) - self.deadzone, 0.0) * self.sensitivity
         magnitude = np.minimum(magnitude, self.max_output)

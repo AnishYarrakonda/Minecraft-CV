@@ -39,6 +39,15 @@ def test_calibrated_neutral_outputs_zero() -> None:
     assert np.allclose(joystick.update(np.array([0.1, -0.1])), 0.0)
 
 
+def test_uncalibrated_preview_uses_first_sample_as_temporary_neutral() -> None:
+    joystick = PalmNormalJoystick(neutral=None, deadzone=0.05, sensitivity=(2.0, 2.0))
+    assert np.allclose(joystick.update(np.array([0.4, -0.2])), 0.0)
+
+    out = joystick.update(np.array([0.55, -0.2]))
+    assert out[0] == pytest.approx(0.2)
+    assert out[1] == pytest.approx(0.0)
+
+
 def test_axis_deadzone_scaling_and_clamp() -> None:
     joystick = PalmNormalJoystick(
         neutral=(0.0, 0.0), deadzone=0.05, sensitivity=(2.0, 3.0), max_output=0.5

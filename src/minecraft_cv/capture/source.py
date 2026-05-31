@@ -24,6 +24,8 @@ import numpy as np
 # Below this per-frame pixel standard deviation, a frame is treated as "blank" (a black or
 # uniform frame from a missing Camera permission), not real imagery.
 _BLANK_STD_THRESHOLD = 1.0
+_LIVE_READ_RETRY_ATTEMPTS = 30
+_LIVE_READ_RETRY_SLEEP_S = 0.01
 
 
 class FrameSource(ABC):
@@ -150,11 +152,15 @@ class AVFoundationSource(FrameSource):
         )
 
     def read(self) -> np.ndarray | None:
-        """Read one BGR frame from the live camera, or ``None`` on read failure."""
-        ok, frame = self._cap.read()
-        if not ok or frame is None:
-            return None
-        return cast(np.ndarray, frame)
+        """Read one BGR frame from the live camera, or ``None`` on sustained failure."""
+        import time
+
+        for _ in range(_LIVE_READ_RETRY_ATTEMPTS):
+            ok, frame = self._cap.read()
+            if ok and frame is not None:
+                return cast(np.ndarray, frame)
+            time.sleep(_LIVE_READ_RETRY_SLEEP_S)
+        return None
 
     def release(self) -> None:
         """Release the underlying ``cv2.VideoCapture`` object."""

@@ -108,14 +108,35 @@ backend selection, device. No magic numbers in gesture or joystick code.
 ```
 src/minecraft_cv/
 ├── capture/        # VideoCapture wrapper, frame source interface, buffer thread
+│   ├── source.py       # AVFoundationSource (cv2.VideoCapture + explicit FPS/resolution)
+│   └── buffer.py       # single-slot FrameBuffer (drop stale, keep newest)
 ├── tracking/       # HandTracker ABC; mediapipe_backend.py; optional yolo_backend.py
-├── gestures/       # SchmittTrigger, PinchStateMachine, per-hand gesture resolver
-├── joystick/       # DeadzoneJoystick, accel curve, recenter macro, drift handling
+│   ├── tracker.py      # HandTracker ABC + HandResult dataclass
+│   └── mediapipe_backend.py
+├── gestures/       # all discrete gesture state machines
+│   ├── schmitt.py      # raw Schmitt-trigger (threshold hysteresis)
+│   ├── pinch.py        # right-hand pinch-bitmask state machine
+│   ├── extension.py    # left-hand finger-extension state machine
+│   ├── finger_state.py # extension ratio helpers
+│   ├── registry.py     # GestureStateMachine (config-driven detector map)
+│   ├── inventory.py    # two-hand open-palm inventory-mode toggle
+│   └── safety.py       # TrackingLossGuard (key release on hand dropout)
+├── joystick/       # spatial joystick math
+│   ├── deadzone.py     # sphere deadzone + cardinal zones + accel curve
+│   ├── palm_normal.py  # default mode: calibrated palm-normal joystick
+│   ├── wrist_rotation.py  # legacy mode: wrist XZ translation joystick
+│   ├── sprint_velocity.py # optional depth-velocity Sprint trigger
+│   └── one_euro.py     # One-Euro velocity-adaptive filter for mouse look
 ├── input/          # InputEmitter ABC, NullEmitter, MacInputEmitter (pynput+Quartz)
+│   ├── emitter.py
+│   └── mac_emitter.py
+├── calibration.py  # auto-calibration logic (palm-normal neutral + pinch thresholds)
+├── recovery.py     # per-hand tracking-loss recovery state machine
 ├── pipeline.py     # wires capture → tracking → gestures → joystick → input
-└── config.py       # pydantic Settings model
+└── config.py       # pydantic Settings model (all tunable values via config.yaml)
 
-scripts/            # CLI entrypoints: mcv-run, mcv-calibrate, mcv-analyze, mcv-bench
+cli.py              # CLI entrypoints: mcv run/calibrate/analyze/bench/doctor/gestures
+                    # (installed as mcv, mcv-run, mcv-calibrate, mcv-analyze, mcv-bench)
 tests/              # mirrors src/ structure; gesture SM tests are pure/deterministic
 data/               # clips + annotations (git-ignored; large files go in data/clips/)
 ```

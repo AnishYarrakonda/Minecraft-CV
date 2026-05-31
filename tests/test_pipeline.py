@@ -52,6 +52,24 @@ def test_palm_normal_mode_requires_calibration() -> None:
         raise AssertionError("Pipeline.from_settings should require palm-normal calibration")
 
 
+def test_uncalibrated_palm_normal_preview_auto_neutralizes_first_sample(
+    null_emitter: NullEmitter,
+    make_palm_normal_landmarks: Callable[..., np.ndarray],
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    pipe = Pipeline.from_settings(
+        Settings(),
+        emitter=null_emitter,
+        allow_uncalibrated_palm_normal=True,
+    )
+    left = make_hand_result(make_palm_normal_landmarks(normal_xy=(0.3, 0.0)), "Right")
+    assert pipe.step([left]).wasd_held == frozenset()
+
+    moved_left = make_hand_result(make_palm_normal_landmarks(normal_xy=(0.45, 0.0)), "Right")
+    result = pipe.step([moved_left])
+    assert result.wasd_held == frozenset({"d"})
+
+
 # ---------------------------------------------------------------------------
 # Left hand — pinch gestures (pass handedness="Right" → swapped to left)
 # ---------------------------------------------------------------------------

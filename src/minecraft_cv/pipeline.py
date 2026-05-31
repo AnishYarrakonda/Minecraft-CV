@@ -144,7 +144,10 @@ class Pipeline:
 
     @classmethod
     def from_settings(
-        cls, settings: Settings, emitter: InputEmitter | None = None
+        cls,
+        settings: Settings,
+        emitter: InputEmitter | None = None,
+        allow_uncalibrated_palm_normal: bool = False,
     ) -> Pipeline:
         """Build a pipeline from a :class:`Settings` model.
 
@@ -152,6 +155,8 @@ class Pipeline:
             settings: Loaded configuration.
             emitter: Override emitter; if None, one is created from ``settings`` (a
                 ``NullEmitter`` unless ``input.enabled`` is True).
+            allow_uncalibrated_palm_normal: Allow missing palm-normal neutrals for safe
+                dry-run preview. The first visible sample temporarily seeds neutral.
 
         Returns:
             A ready-to-run :class:`Pipeline`.
@@ -165,10 +170,12 @@ class Pipeline:
         right_joy: JoystickLike
         if j.mode == "palm_normal":
             pn = j.palm_normal
-            if pn.left_neutral is None or pn.right_neutral is None:
+            missing_palm_neutral = pn.left_neutral is None or pn.right_neutral is None
+            if missing_palm_neutral and not allow_uncalibrated_palm_normal:
                 raise ValueError(
-                    "Palm-normal joystick requires calibration. Run "
-                    "`mcv calibrate --apply` to write left/right neutral normals."
+                    "Palm-normal joystick requires calibration before live input. Run "
+                    "`mcv calibrate --apply` to write left/right neutral normals, or use "
+                    "`mcv run --no-input --debug-overlay` for an uncalibrated preview."
                 )
             left_joy = PalmNormalJoystick(
                 pn.left_neutral, pn.deadzone, pn.left_sensitivity, j.max_output, j.smoothing
@@ -539,13 +546,19 @@ class Pipeline:
         self.emitter.release_all()
 
 
-def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
+def run_pipeline(
+    settings: Settings,
+    source: FrameSource | None = None,
+    allow_uncalibrated_palm_normal: bool = False,
+) -> None:
     """Run the live capture loop until the source is exhausted or interrupted.
 
     Args:
         settings: Loaded configuration (camera, tracking, gestures, input, debug).
         source: Optional injected frame source. If None, a camera or clip source is built
             from ``settings`` (a clip would be wired by the CLI; default is the camera).
+        allow_uncalibrated_palm_normal: Safe preview escape hatch for dry-runs with missing
+            palm-normal calibration. Never enable this for real input emission.
 
     Notes:
         OpenCV (color convert / resize / overlay) is imported lazily here. HighGUI calls run
@@ -556,7 +569,10 @@ def run_pipeline(settings: Settings, source: FrameSource | None = None) -> None:
     from minecraft_cv.capture.buffer import FrameBuffer
     from minecraft_cv.capture.source import AVFoundationSource
 
-    pipeline = Pipeline.from_settings(settings)
+    pipeline = Pipeline.from_settings(
+        settings,
+        allow_uncalibrated_palm_normal=allow_uncalibrated_palm_normal,
+    )
     if source is None:
         source = AVFoundationSource(
             index=settings.camera.index,
