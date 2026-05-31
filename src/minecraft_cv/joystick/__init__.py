@@ -1,27 +1,10 @@
-"""Spatial-joystick layer: palm normals, wrist rotation, deadzones, and recentering."""
+"""Spatial-joystick layer: absolute screen tracking and exponential steering curves."""
 
 from __future__ import annotations
 
-from minecraft_cv.joystick.deadzone import ANCHOR_INDEX, DeadzoneJoystick, anchor_xy
-from minecraft_cv.joystick.palm_normal import (
-    PalmNormalJoystick,
-    palm_normal,
-    palm_normal_xy,
-)
-from minecraft_cv.joystick.wrist_rotation import (
-    WristRotationJoystick,
-    palm_vector,
-    palm_xz,
-)
+from minecraft_cv.joystick.screen import ScreenJoystick, screen_mcp_centroid
 
 __all__ = [
-    "ANCHOR_INDEX",
-    "DeadzoneJoystick",
-    "PalmNormalJoystick",
-    "WristRotationJoystick",
-    "anchor_xy",
-    "palm_normal",
-    "palm_normal_xy",
-    "palm_vector",
-    "palm_xz",
+    "ScreenJoystick",
+    "screen_mcp_centroid",
 ]

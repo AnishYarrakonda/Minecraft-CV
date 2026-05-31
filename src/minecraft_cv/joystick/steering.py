@@ -16,84 +16,54 @@ from collections.abc import Mapping
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Internal constants (not exported; callers use the parameter API)
-# ---------------------------------------------------------------------------
-
-# Cardinal angle centres, in degrees.  Matches the axis convention documented below.
-_CARDINALS: dict[str, float] = {
-    "right": 0.0,
-    "forward": 90.0,
-    "left": 180.0,
-    "back": -90.0,
-}
-
-
-def _angular_dist(theta: float, centre: float) -> float:
-    """Shortest signed-magnitude arc between two angles (degrees).
-
-    Handles the ±180° wraparound so e.g. dist(179°, −179°) == 2°, not 358°.
-
-    Args:
-        theta: Query angle in degrees.
-        centre: Reference angle in degrees.
-
-    Returns:
-        Unsigned angular distance in ``[0, 180]`` degrees.
-    """
-    return abs(((theta - centre + 180.0) % 360.0) - 180.0)
-
-
-def cardinal_keys(
+def octant_keys(
     output: np.ndarray,
-    half_width_deg: float,
     bindings: Mapping[str, str],
 ) -> set[str]:
-    """Convert a 2D joystick output vector into the set of WASD keys to press.
+    """Convert a 2D joystick output vector into one of 8 strict radial slices.
 
-    Axis convention (right-hand, image-plane):
+    The 360-degree space is partitioned into 8 equal 45-degree pizza slices:
+    W, WD, D, SD, S, SA, A, WA.
 
-    - ``+output[0]`` → ``bindings["right"]``
-    - ``−output[0]`` → ``bindings["left"]``
-    - ``+output[1]`` → ``bindings["forward"]``
-    - ``−output[1]`` → ``bindings["back"]``
-
-    Each cardinal fires when the angle to its centre is within
-    ``(90.0 − half_width_deg)`` degrees.  Two cardinals fire simultaneously in the
-    diagonal bands between pure zones, producing combined movement (e.g. W+A for
-    forward-left).
-
-    Threshold semantics:
-
-    - ``half_width_deg=35`` → 55° firing radius; pure zones ±35°; 20° diagonal bands.
-    - ``half_width_deg=45`` → 45° firing radius; no overlaps → no diagonals ever.
-    - ``half_width_deg=0``  → 90° firing radius → any nonzero component fires.
+    Axis convention (image-plane):
+    - ``+x`` → Right
+    - ``+y`` → Down (Back)
+    - ``-y`` → Up (Forward)
 
     Args:
         output: ``(2,)`` joystick vector ``(x, y)`` in abstract joystick units.
-            Longer arrays are accepted; only the first two components are used.
-        half_width_deg: Half-angle of the *pure zone* in degrees.  A larger value
-            widens the pure zone and narrows the diagonal bands. Range: ``[0, 90)``.
-        bindings: Map of cardinal names to key strings.  Must contain keys
+        bindings: Map of cardinal names to key strings. Must contain keys
             ``"right"``, ``"left"``, ``"forward"``, ``"back"``.
 
     Returns:
-        The set of key strings (from ``bindings``) that should be held this frame.
-        Empty set when the vector is zero or near-zero.
+        The set of key strings to hold this frame. Empty set if vector is zero.
     """
     vec = np.asarray(output, dtype=np.float64)
-    mag = float(np.linalg.norm(vec[:2]))
-    if mag <= 0.0:
+    if np.linalg.norm(vec[:2]) <= 0.0:
         return set()
 
     theta = math.degrees(math.atan2(float(vec[1]), float(vec[0])))
-    firing_radius = 90.0 - half_width_deg
+    octant = round(theta / 45.0) % 8
 
-    pressed: set[str] = set()
-    for direction, centre in _CARDINALS.items():
-        if _angular_dist(theta, centre) <= firing_radius:
-            pressed.add(bindings[direction])
-    return pressed
+    # 0: Right (D)
+    # 1: Back-Right (SD)
+    # 2: Back (S)
+    # 3: Back-Left (SA)
+    # 4: Left (A)
+    # 5: Forward-Left (WA)
+    # 6: Forward (W)
+    # 7: Forward-Right (WD)
+    octant_map = [
+        {"right"},
+        {"back", "right"},
+        {"back"},
+        {"back", "left"},
+        {"left"},
+        {"forward", "left"},
+        {"forward"},
+        {"forward", "right"},
+    ]
+    return {bindings[k] for k in octant_map[octant]}
 
 
 def accel_curve(
@@ -143,4 +113,4 @@ def accel_curve(
     return np.asarray((vec2 / mag) * shaped, dtype=np.float64)
 
 
-__all__ = ["accel_curve", "cardinal_keys"]
+__all__ = ["accel_curve", "octant_keys"]

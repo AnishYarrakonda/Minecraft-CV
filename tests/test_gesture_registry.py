@@ -26,7 +26,7 @@ def test_left_pinch_mapping_from_default_config(
 
 
 def test_curl_only_requires_other_fingers_open(
-    make_wrist_rotation_landmarks: Callable[..., np.ndarray],
+    make_screen_landmarks: Callable[..., np.ndarray],
 ) -> None:
     gesture = GestureDetectorSettings(
         detector="curl_only",
@@ -36,7 +36,7 @@ def test_curl_only_requires_other_fingers_open(
         open_fingers=("thumb", "index", "middle", "ring"),
     )
     sm = GestureStateMachine("left", {"test": gesture})
-    held = make_wrist_rotation_landmarks(
+    held = make_screen_landmarks(
         extensions={"index": 1.3, "middle": 1.3, "ring": 1.3, "pinky": 0.8},
         thumb_ext=1.3,
     )
@@ -44,7 +44,7 @@ def test_curl_only_requires_other_fingers_open(
     events = sm.update(held)
     assert _names(events) == {("test", KEY_DOWN, "left")}
 
-    not_open = make_wrist_rotation_landmarks(
+    not_open = make_screen_landmarks(
         extensions={"index": 0.8, "middle": 1.3, "ring": 1.3, "pinky": 0.8},
         thumb_ext=1.3,
     )
@@ -53,10 +53,10 @@ def test_curl_only_requires_other_fingers_open(
 
 
 def test_curl_combo_requires_all_listed_fingers_down_but_ignores_others(
-    make_wrist_rotation_landmarks: Callable[..., np.ndarray],
+    make_screen_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = GestureStateMachine("right", {"sprint": Settings().gestures.right_hand["sprint"]})
-    peace_with_thumb_relaxed = make_wrist_rotation_landmarks(
+    peace_with_thumb_relaxed = make_screen_landmarks(
         extensions={"index": 0.8, "middle": 1.3, "ring": 0.8, "pinky": 0.8},
         thumb_ext=0.4,
     )
@@ -64,7 +64,7 @@ def test_curl_combo_requires_all_listed_fingers_down_but_ignores_others(
     events = sm.update(peace_with_thumb_relaxed)
     assert _names(events) == {("sprint", KEY_DOWN, "right")}
 
-    ring_up = make_wrist_rotation_landmarks(
+    ring_up = make_screen_landmarks(
         extensions={"index": 0.8, "middle": 1.3, "ring": 1.3, "pinky": 0.8},
         thumb_ext=0.4,
     )
@@ -74,27 +74,27 @@ def test_curl_combo_requires_all_listed_fingers_down_but_ignores_others(
 
 
 def test_left_sneak_holds_only_while_ring_pinky_curled(
-    make_wrist_rotation_landmarks: Callable[..., np.ndarray],
+    make_screen_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = GestureStateMachine("left", Settings().gestures.left_hand)
-    sneak = make_wrist_rotation_landmarks(extensions={"ring": 0.8, "pinky": 0.8})
+    sneak = make_screen_landmarks(extensions={"ring": 0.8, "pinky": 0.8})
     sm.update(sneak)
     events = sm.update(sneak)
-    assert _names(events) == {("sneak", KEY_DOWN, "left")}
-    assert sm.held == {"sneak"}
+    assert _names(events) == {("sneak", KEY_DOWN, "left"), ("recenter", KEY_DOWN, "left")}
+    assert sm.held == {"sneak", "recenter"}
 
-    open_hand = make_wrist_rotation_landmarks()
+    open_hand = make_screen_landmarks()
     sm.update(open_hand)
     events = sm.update(open_hand)
-    assert _names(events) == {("sneak", KEY_UP, "left")}
+    assert _names(events) == {("sneak", KEY_UP, "left"), ("recenter", KEY_UP, "left")}
     assert sm.held == set()
 
 
 def test_modifier_suppresses_same_finger_pinches(
-    make_wrist_rotation_landmarks: Callable[..., np.ndarray],
+    make_screen_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = GestureStateMachine("left", Settings().gestures.left_hand)
-    sneak_and_pinches = make_wrist_rotation_landmarks(extensions={"ring": 0.8, "pinky": 0.8})
+    sneak_and_pinches = make_screen_landmarks(extensions={"ring": 0.8, "pinky": 0.8})
     scale = float(np.linalg.norm(sneak_and_pinches[9] - sneak_and_pinches[0]))
     sneak_and_pinches[4] = sneak_and_pinches[16] + np.array([0.20 * scale, 0.0, 0.0])
     sm.update(sneak_and_pinches)

@@ -98,54 +98,12 @@ gestures:
       - hotbar_next
       - hotbar_prev
 joystick:
-  mode: palm_tilt
-  tilt:
-    left_neutral:
-    - 0.0797
-    - -0.8649
-    right_neutral:
-    - -0.06281
-    - -0.87518
-    deadzone: 0.05362
-    left_sensitivity:
-    - 3.02231
-    - 1.27815
-    right_sensitivity:
-    - 1.1126
-    - 2.16569
-    left_sensitivity_neg:
-    - 2.57104
-    - 22.79993
-    right_sensitivity_neg:
-    - 11.25705
-    - 18.65028
-  palm_normal:
-    left_neutral:
-    - -0.2789
-    - -0.15363
-    right_neutral:
-    - 0.37115
-    - -0.14468
-    deadzone: 0.44679
-    left_sensitivity:
-    - 8.29951
-    - 1.73796
-    right_sensitivity:
-    - 1.95802
-    - 1.8916
-  deadzone_radius: 0.05
-  sensitivity: 2.0
-  accel_exponent: 2.0
-  anchor: wrist
-  max_output: 1.0
-  smoothing: 0.4
-  recenter_grace_frames: 3
-  cardinal_half_width: 40.0
-  dynamic_deadzone: false
-  calibration_frames: 150
-  dynamic_deadzone_margin: 1.5
-  look_filter: one_euro
+  deadzone: 0.08
+  left_sensitivity: 5.0
+  right_sensitivity: 5.0
   look_accel_exponent: 1.6
+  smoothing: 0.4
+  look_filter: one_euro
   one_euro_min_cutoff: 1.0
   one_euro_beta: 0.007
   one_euro_d_cutoff: 1.0

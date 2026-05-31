@@ -22,13 +22,9 @@ CONFIG_YAML = REPO_ROOT / "config.yaml"
 def test_defaults_construct_without_yaml() -> None:
     s = Settings()
     assert s.camera.index == 0
-    assert s.input.enabled is False  # NullEmitter by default (invariant #2)
-    assert s.joystick.mode == "palm_tilt"
-    assert s.joystick.tilt.left_neutral is None
-    assert s.joystick.palm_normal.left_neutral is None
-    assert s.joystick.anchor == "wrist"
-    assert s.joystick.cardinal_half_width == 35.0
-    assert s.camera.mirror is True  # mirror view by default (also fixes handedness)
+    assert s.input.enabled is False  # NullEmitter by default
+    assert s.joystick.deadzone == 0.04
+    assert s.camera.mirror is True  # mirror view by default
     assert s.tracking.swap_handedness is True
     assert s.inventory.enabled is False
     assert set(s.gestures.left_hand) == {
@@ -37,8 +33,9 @@ def test_defaults_construct_without_yaml() -> None:
         "inventory",
         "throw_item",
         "switch_offhand",
+        "recenter",
     }
-    assert set(s.gestures.right_hand) == {"attack", "use", "hotbar_next", "hotbar_prev", "sprint"}
+    assert set(s.gestures.right_hand) == {"attack", "use", "hotbar_next", "hotbar_prev", "sprint", "recenter"}
 
     # Check new bindings exist
     assert s.bindings["sprint"] == "ctrl"
@@ -50,7 +47,6 @@ def test_load_project_config_yaml() -> None:
     s = Settings.load(CONFIG_YAML)
     assert s.camera.fps == 30
     assert s.tracking.backend == "mediapipe"
-    assert s.joystick.mode == "palm_tilt"
     assert s.gestures.left_hand["jump"].detector == "pinch"
     assert s.gestures.left_hand["sneak"].detector == "curl_combo"
     assert s.gestures.left_hand["sneak"].mode == "hold"
@@ -157,7 +153,7 @@ def test_extra_keys_forbidden(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# New field tests: look_accel_exponent + sensitivity_neg
+# New field tests: look_accel_exponent
 # ---------------------------------------------------------------------------
 
 
@@ -183,43 +179,9 @@ def test_look_accel_exponent_must_be_positive(tmp_path: Path) -> None:
         Settings.load(cfg)
 
 
-def test_sensitivity_neg_defaults_none() -> None:
-    """left_sensitivity_neg and right_sensitivity_neg should default to None."""
-    s = Settings()
-    assert s.joystick.tilt.left_sensitivity_neg is None
-    assert s.joystick.tilt.right_sensitivity_neg is None
-    assert s.joystick.palm_normal.left_sensitivity_neg is None
-    assert s.joystick.palm_normal.right_sensitivity_neg is None
-
-
-def test_sensitivity_neg_round_trips_via_yaml(tmp_path: Path) -> None:
-    """sensitivity_neg values survive a YAML round-trip."""
-    data = {
-        "joystick": {
-            "mode": "palm_tilt",
-            "tilt": {
-                "left_neutral": [0.0, 0.0],
-                "right_neutral": [0.0, 0.0],
-                "deadzone": 0.05,
-                "left_sensitivity": [4.0, 3.0],
-                "right_sensitivity": [4.0, 3.0],
-                "left_sensitivity_neg": [3.5, 10.0],
-                "right_sensitivity_neg": [3.5, 9.5],
-            },
-        }
-    }
-    cfg = tmp_path / "cfg.yaml"
-    cfg.write_text(yaml.safe_dump(data))
-    s = Settings.load(cfg)
-    assert s.joystick.tilt.left_sensitivity_neg == pytest.approx((3.5, 10.0))
-    assert s.joystick.tilt.right_sensitivity_neg == pytest.approx((3.5, 9.5))
-
-
 def test_project_config_yaml_loads_new_fields() -> None:
     """The project config.yaml must load cleanly with the new fields."""
     s = Settings.load(CONFIG_YAML)
     assert s.joystick.smoothing == pytest.approx(0.4)
-    assert s.joystick.cardinal_half_width == pytest.approx(40.0)
     assert s.joystick.look_accel_exponent == pytest.approx(1.6)
     assert s.input.mouse_delta_scale == pytest.approx(28.0)
-

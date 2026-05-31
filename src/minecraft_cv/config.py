@@ -241,8 +241,18 @@ def _default_left_detector_gestures() -> dict[str, GestureDetectorSettings]:
             curl_fingers=("ring", "pinky"),
             suppresses=("throw_item", "switch_offhand"),
         ),
+        "recenter": GestureDetectorSettings(
+            detector="curl_combo",
+            finger="ring",
+            t_engage=0.95,
+            t_release=1.05,
+            mode="hold",
+            curl_fingers=("ring", "pinky"),
+            open_fingers=("thumb", "index", "middle"),
+            open_threshold=1.1,
+            suppresses=("jump", "inventory", "throw_item", "switch_offhand"),
+        ),
     }
-
 
 def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
     return {
@@ -282,6 +292,17 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             curl_fingers=("ring", "pinky"),
             suppresses=("hotbar_next", "hotbar_prev"),
         ),
+        "recenter": GestureDetectorSettings(
+            detector="curl_combo",
+            finger="ring",
+            t_engage=0.95,
+            t_release=1.05,
+            mode="hold",
+            curl_fingers=("ring", "pinky"),
+            open_fingers=("thumb", "index", "middle"),
+            open_threshold=1.1,
+            suppresses=("attack", "use", "hotbar_next", "hotbar_prev"),
+        ),
     }
 
 
@@ -298,115 +319,28 @@ class GestureSettings(BaseModel):
     )
 
 
-class PalmNormalSettings(BaseModel):
-    """Calibrated palm-normal joystick parameters."""
-
-    model_config = {"extra": "forbid"}
-
-    left_neutral: tuple[float, float] | None = None
-    right_neutral: tuple[float, float] | None = None
-    deadzone: float = Field(default=0.05, ge=0.0)
-    left_sensitivity: tuple[float, float] = (2.0, 2.0)
-    right_sensitivity: tuple[float, float] = (2.0, 2.0)
-    left_sensitivity_neg: tuple[float, float] | None = None
-    """Optional negative-direction per-axis gain for the left hand.
-
-    When ``None`` (default), the positive ``left_sensitivity`` is used for both directions
-    (symmetric). When set, negative-delta axes use this gain instead — allows the
-    geometrically-smaller back/left reach to be independently boosted.
-    """
-    right_sensitivity_neg: tuple[float, float] | None = None
-    """Optional negative-direction per-axis gain for the right hand. See ``left_sensitivity_neg``."""
-
-
-
-class TiltSettings(PalmNormalSettings):
-    """Calibrated knuckle-tilt joystick parameters (the ``palm_tilt`` default mode).
-
-    Identical in shape to :class:`PalmNormalSettings` — a calibrated per-hand neutral, a
-    deadzone, and per-axis sensitivities — but the stored ``(x, y)`` neutral is the resting
-    *tilt* vector (wrist->MCP-centroid in the image plane), not a palm normal. Kept as a
-    separate block so the legacy ``palm_normal`` calibration can coexist and be switched to.
-    """
-
-
 class JoystickSettings(BaseModel):
-    """Spatial-joystick mode, calibration, deadzone, and sensitivity parameters.
-
-    ``palm_tilt`` is the default gameplay mode (image-plane knuckle tilt). The older
-    ``palm_normal`` and ``wrist_rotation`` modes remain available for experiments and for the
-    legacy calibration path.
-    """
+    """Absolute screen-space joystick parameters (zero calibration)."""
 
     model_config = {"extra": "forbid"}
 
-    mode: JoystickMode = "palm_tilt"
-    tilt: TiltSettings = Field(default_factory=TiltSettings)
-    palm_normal: PalmNormalSettings = Field(default_factory=PalmNormalSettings)
-    deadzone_radius: float = Field(default=0.05, ge=0.0)
-    sensitivity: float = Field(default=2.0, gt=0.0)
-    accel_exponent: float = Field(default=2.0, gt=0.0)
-    anchor: Anchor = "wrist"
-    max_output: float = Field(default=1.0, gt=0.0)
-    smoothing: float = Field(default=0.6, ge=0.0, lt=1.0)
-    """EMA smoothing factor on the anchor position (0 = none, ->1 = heavy).
-
-    Cuts MediaPipe landmark jitter before it reaches the deadzone/accel curve so the
-    joystick output flows instead of chattering. Higher = calmer but slightly more lag.
-    """
-    recenter_grace_frames: int = Field(default=3, ge=0)
-    """Consecutive missing-hand frames tolerated before the neutral is recentered.
-
-    A single dropped frame should not snap the neutral to a new position (a jarring jump on
-    the next frame). The hand's keys are still released immediately on any miss; only the
-    recenter macro waits for a sustained dropout.
-    """
-    cardinal_half_width: float = Field(default=35.0, ge=0.0, le=45.0)
-    """Half-width (degrees) of each pure cardinal direction zone.
-
-    With the default of 35°, each axis has a 70° zone (±35°) where only that axis's key is
-    pressed (pure W, pure D, etc.). The remaining 20° between zones produces diagonal
-    movement (W+D, etc.). Set to 45° for no diagonals; set to 0° for the old behavior
-    where any non-zero component always fires.
-    """
-
-    # --- Dynamic deadzone (V2) ---------------------------------------------------------
-    dynamic_deadzone: bool = False
-    """Adapt the deadzone radius to the user's resting hand jitter (V2).
-
-    When enabled, each joystick spends the first ``calibration_frames`` samples after
-    (re)centering measuring how far the resting anchor wanders, then grows its effective
-    deadzone to ``deadzone_radius + dynamic_deadzone_margin * jitter`` so resting tremor never
-    leaks into movement. Default False preserves the static ``deadzone_radius`` behavior.
-    """
-    calibration_frames: int = Field(default=150, ge=0)
-    """Resting samples collected to estimate jitter (~5 s at 30 FPS). Output is held at zero
-    during this window; recentering (recenter macro) restarts calibration."""
-    dynamic_deadzone_margin: float = Field(default=1.5, ge=0.0)
-    """Multiplier on the measured resting-jitter radius added to the base deadzone."""
-
+    deadzone: float = Field(default=0.04, ge=0.0)
+    left_sensitivity: float = Field(default=5.0, gt=0.0)
+    right_sensitivity: float = Field(default=5.0, gt=0.0)
     look_accel_exponent: float = Field(default=1.6, gt=0.0)
-    """Exponential ease-in exponent applied to the mouse-look output before the One-Euro filter.
+    """Exponential ease-in exponent applied to the right-hand mouse-look output."""
+    smoothing: float = Field(default=0.1, ge=0.0, lt=1.0)
+    """EMA smoothing factor on the tracked position (0 = none, ->1 = heavy)."""
+    fixed_left_neutral: tuple[float, float] | None = Field(default=(0.25, 0.5))
+    """Optional fixed screen-space anchor (x, y) for the left joystick (WASD)."""
+    fixed_right_neutral: tuple[float, float] | None = Field(default=(0.75, 0.5))
+    """Optional fixed screen-space anchor (x, y) for the right joystick (mouse look)."""
 
-    ``exponent > 1`` produces gentle precise movement at small tilts and fast saturation at
-    large tilts (mitigates Gorilla Arm on the right hand). ``1.0`` is a linear pass-through
-    (off). Applied only to the look path; WASD stays digital.
-    """
-
-    # --- Mouse-look smoothing (V2) -----------------------------------------------------
+    # --- Mouse-look smoothing ----------------------------------------------------------
     look_filter: Literal["ema", "one_euro"] = "one_euro"
-    """Smoothing applied to the right-hand mouse-look output before emission.
-
-    ``ema`` relies solely on the joystick's ``smoothing`` (uniform lag). ``one_euro`` adds a
-    velocity-adaptive One-Euro filter that is steady at rest and snappy in motion — the
-    recommended setting for camera look.
-    """
     one_euro_min_cutoff: float = Field(default=1.0, gt=0.0)
-    """One-Euro baseline cutoff (Hz): lower = smoother at rest, more lag."""
     one_euro_beta: float = Field(default=0.007, ge=0.0)
-    """One-Euro speed coefficient: higher = less lag during fast looks, more jitter."""
     one_euro_d_cutoff: float = Field(default=1.0, gt=0.0)
-    """One-Euro derivative cutoff (Hz) for the internal speed estimate."""
 
 
 class SprintVelocitySettings(BaseModel):

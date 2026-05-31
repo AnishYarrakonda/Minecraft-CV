@@ -1,4 +1,4 @@
-"""Pure unit tests for the steering helpers: cardinal_keys and accel_curve.
+"""Pure unit tests for the steering helpers: octant_keys and accel_curve.
 
 No camera, no MediaPipe, no OS input — all deterministic math.
 """
@@ -10,94 +10,80 @@ import math
 import numpy as np
 import pytest
 
-from minecraft_cv.joystick.steering import accel_curve, cardinal_keys
+from minecraft_cv.joystick.steering import accel_curve, octant_keys
 
 _BINDINGS = {"right": "d", "left": "a", "forward": "w", "back": "s"}
 
 
 # ---------------------------------------------------------------------------
-# cardinal_keys
+# octant_keys
 # ---------------------------------------------------------------------------
 
 
 def test_zero_vector_returns_empty() -> None:
-    assert cardinal_keys(np.zeros(2), 35.0, _BINDINGS) == set()
-
-
-def test_pure_forward_fires_only_w() -> None:
-    out = np.array([0.0, 0.5])
-    assert cardinal_keys(out, 35.0, _BINDINGS) == {"w"}
-
-
-def test_pure_back_fires_only_s() -> None:
-    out = np.array([0.0, -0.5])
-    assert cardinal_keys(out, 35.0, _BINDINGS) == {"s"}
+    assert octant_keys(np.zeros(2), _BINDINGS) == set()
 
 
 def test_pure_right_fires_only_d() -> None:
-    out = np.array([0.5, 0.0])
-    assert cardinal_keys(out, 35.0, _BINDINGS) == {"d"}
+    # +x is Right (0 degrees)
+    out = np.array([1.0, 0.0])
+    assert octant_keys(out, _BINDINGS) == {"d"}
+
+
+def test_pure_back_fires_only_s() -> None:
+    # +y is Down/Back (+90 degrees in image coords)
+    out = np.array([0.0, 1.0])
+    assert octant_keys(out, _BINDINGS) == {"s"}
 
 
 def test_pure_left_fires_only_a() -> None:
-    out = np.array([-0.5, 0.0])
-    assert cardinal_keys(out, 35.0, _BINDINGS) == {"a"}
+    # -x is Left (180 degrees)
+    out = np.array([-1.0, 0.0])
+    assert octant_keys(out, _BINDINGS) == {"a"}
 
 
-def test_anti_drift_mostly_forward_slight_sideways() -> None:
-    """The key anti-drift case: small x deviation on mostly-forward tilt -> only W."""
-    # Angle ≈ 80° from +x axis -> forward zone (90°). With half_width=35, firing radius=55°.
-    # Angular distance from 80° to 90° = 10° which is ≤ 55°. Also check D doesn't fire:
-    # distance from 80° to 0° = 80° which is > 55°.
-    out = np.array([0.1, 0.6])  # clearly more forward than sideways
-    result = cardinal_keys(out, 35.0, _BINDINGS)
-    assert "w" in result
-    assert "d" not in result
+def test_pure_forward_fires_only_w() -> None:
+    # -y is Up/Forward (-90 degrees)
+    out = np.array([0.0, -1.0])
+    assert octant_keys(out, _BINDINGS) == {"w"}
 
 
-def test_diagonal_near_45_fires_both_w_and_d() -> None:
-    """At exactly 45° with half_width=35 both W and D should fire (diagonal band)."""
-    # 45° is equidistant from 0° (right) and 90° (forward).
-    # firing_radius = 90 - 35 = 55°. dist(45°, 0°) = 45° ≤ 55°; dist(45°, 90°) = 45° ≤ 55°.
-    out = np.array([0.5, 0.5])
-    result = cardinal_keys(out, 35.0, _BINDINGS)
-    assert "w" in result
-    assert "d" in result
+def test_diagonals_fire_two_keys() -> None:
+    # 45 degrees: Back-Right
+    out_sd = np.array([1.0, 1.0])
+    assert octant_keys(out_sd, _BINDINGS) == {"s", "d"}
+
+    # 135 degrees: Back-Left
+    out_sa = np.array([-1.0, 1.0])
+    assert octant_keys(out_sa, _BINDINGS) == {"s", "a"}
+
+    # -135 degrees: Forward-Left
+    out_wa = np.array([-1.0, -1.0])
+    assert octant_keys(out_wa, _BINDINGS) == {"w", "a"}
+
+    # -45 degrees: Forward-Right
+    out_wd = np.array([1.0, -1.0])
+    assert octant_keys(out_wd, _BINDINGS) == {"w", "d"}
 
 
-def test_half_width_45_no_diagonals() -> None:
-    """half_width=45 means firing_radius=45°; at 45° exactly, dist equals threshold -> no overlap."""
-    # dist(45°, 0°) = 45°. With firing_radius=45, only cardinals within exactly 45° fire.
-    # Strict inequality (<=) at exactly 45° fires, so let's use an angle slightly past 45°.
-    # We test a clearly-diagonal input to confirm that half_width=45 suppresses double-fire.
-    # At 67.5° from +x: dist(67.5°, 0°)=67.5°>45; dist(67.5°, 90°)=22.5°<=45.
-    angle = math.radians(67.5)
-    out = np.array([math.cos(angle), math.sin(angle)])
-    result = cardinal_keys(out, 45.0, _BINDINGS)
-    assert "w" in result
-    assert "d" not in result
-
-
-def test_half_width_0_any_nonzero_component_fires() -> None:
-    """half_width=0 -> firing_radius=90 -> any nonzero vector fires at least one key."""
-    # A purely rightward vector should fire D.
-    assert "d" in cardinal_keys(np.array([0.1, 0.0]), 0.0, _BINDINGS)
-    # A purely forward vector should fire W.
-    assert "w" in cardinal_keys(np.array([0.0, 0.1]), 0.0, _BINDINGS)
-
-
-def test_back_fires_for_negative_y() -> None:
-    """Negative y output (back) should fire S, not W."""
-    out = np.array([0.0, -0.3])
-    result = cardinal_keys(out, 35.0, _BINDINGS)
-    assert "s" in result
-    assert "w" not in result
+def test_octant_boundaries() -> None:
+    """Test angles right on the slice boundaries (multiples of 22.5 deg).
+    
+    math.atan2(-0.41421356, 1.0) is approx -22.5 deg.
+    """
+    # 22.4 degrees -> still Right
+    ang1 = math.radians(22.4)
+    assert octant_keys(np.array([math.cos(ang1), math.sin(ang1)]), _BINDINGS) == {"d"}
+    
+    # 22.6 degrees -> crosses into Back-Right
+    ang2 = math.radians(22.6)
+    assert octant_keys(np.array([math.cos(ang2), math.sin(ang2)]), _BINDINGS) == {"s", "d"}
 
 
 def test_accepts_longer_arrays() -> None:
     """Arrays longer than 2 elements should work (only first two used)."""
-    out = np.array([0.0, 0.5, 999.0])
-    assert cardinal_keys(out, 35.0, _BINDINGS) == {"w"}
+    out = np.array([0.0, -0.5, 999.0])
+    assert octant_keys(out, _BINDINGS) == {"w"}
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +131,7 @@ def test_exponent_1_is_linear_passthrough() -> None:
 
 
 def test_continuous_at_zero() -> None:
-    """Output should approach 0 as input magnitude -> 0."""
+    """Output approach 0 as input magnitude -> 0."""
     for eps in [1e-3, 1e-4, 1e-5]:
         out = accel_curve(np.array([eps, 0.0]), 2.0, 1.0)
-        assert float(out[0]) < eps  # exponent 2 -> output smaller than input
+        assert float(out[0]) < eps

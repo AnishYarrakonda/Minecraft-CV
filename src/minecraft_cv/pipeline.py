@@ -24,13 +24,10 @@ from minecraft_cv.gestures.pinch import KEY_DOWN
 from minecraft_cv.gestures.registry import GestureStateMachine
 from minecraft_cv.gestures.safety import AnyGestureEvent, TrackingLossGuard
 from minecraft_cv.input.emitter import InputEmitter, create_emitter
-from minecraft_cv.joystick.deadzone import ANCHOR_INDEX, anchor_xy
 from minecraft_cv.joystick.one_euro import OneEuroFilter
-from minecraft_cv.joystick.palm_normal import PalmNormalJoystick, palm_normal_xy
-from minecraft_cv.joystick.palm_tilt import palm_tilt_xy
+from minecraft_cv.joystick.screen import ScreenJoystick, screen_mcp_centroid
 from minecraft_cv.joystick.sprint_velocity import ENGAGE, RELEASE, SprintVelocityTrigger
-from minecraft_cv.joystick.steering import accel_curve, cardinal_keys
-from minecraft_cv.joystick.wrist_rotation import WristRotationJoystick, palm_xz
+from minecraft_cv.joystick.steering import accel_curve, octant_keys
 from minecraft_cv.recovery import HandRecovery, RecoveryDecision
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
 
@@ -50,6 +47,8 @@ class JoystickLike(Protocol):
     def neutral(self) -> np.ndarray | None: ...
     @property
     def sensitivity(self) -> np.ndarray: ...
+    @property
+    def deadzone(self) -> float: ...
     def reset_neutral(self) -> None: ...
     def update(self, signal: np.ndarray) -> np.ndarray: ...
     def zero(self) -> np.ndarray: ...
@@ -77,8 +76,6 @@ class StepResult:
     """Right joystick neutral ``(x, y)`` at the time of this step."""
     deadzone: float = 0.0
     """Deadzone radius used by the left joystick (for overlay ring)."""
-    cardinal_half_width: float = 35.0
-    """Cardinal-zone half-width (degrees) used for WASD this frame."""
     left_status: HandStatus = "absent"
     """Tracking state of the left hand: ``normal``, ``stabilizing``, or ``absent``."""
     right_status: HandStatus = "absent"
@@ -95,11 +92,7 @@ class Pipeline:
         left_joystick: JoystickLike,
         right_joystick: JoystickLike,
         bindings: dict[str, str],
-        joystick_signal: Callable[[np.ndarray], np.ndarray] = palm_xz,
-        joystick_mode: str = "wrist_rotation",
-        anchor: str = "wrist",
-        recenter_grace_frames: int = 0,
-        cardinal_half_width: float = 35.0,
+        joystick_signal: Callable[[np.ndarray], np.ndarray] = screen_mcp_centroid,
         swap_handedness: bool = True,
         pulse_gestures: frozenset[str] = frozenset(),
         scroll_repeat_rate_hz: float = 8.0,
@@ -122,16 +115,6 @@ class Pipeline:
             right_joystick: Right-hand joystick (-> relative mouse move).
             bindings: Map of gesture/direction name -> OS key name.
             joystick_signal: Landmark signal extractor passed into both joysticks.
-            joystick_mode: Active joystick mode (``palm_tilt``/``palm_normal``/
-                ``wrist_rotation``). In ``palm_tilt`` the inventory cursor is driven by the
-                calibrated tilt signal (absolute pointer); other modes use the legacy
-                anchor-position cursor.
-            anchor: Legacy anchor selector used by velocity sprint and optional cursor mode.
-            recenter_grace_frames: Consecutive missing-hand frames tolerated before a hand's
-                joystick neutral is recentered.
-            cardinal_half_width: Half-angle of each pure cardinal direction zone (degrees).
-                Replaces the old independent per-axis sign check; fires ``cardinal_keys`` so
-                only the geometrically-nearest cardinal(s) are pressed.
             swap_handedness: If True, invert MediaPipe L/R labels in ``_split``.
             pulse_gestures: Legacy one-shot gestures; the default detector map uses holds.
             scroll_repeat_rate_hz: Repeat rate for hotbar scroll while pinch is held.
@@ -160,10 +143,7 @@ class Pipeline:
         self.right_joystick = right_joystick
         self.bindings = bindings
         self.joystick_signal = joystick_signal
-        self.joystick_mode = joystick_mode
-        self.anchor = anchor
-        self.recenter_grace_frames = recenter_grace_frames
-        self.cardinal_half_width = cardinal_half_width
+        self.recenter_grace_frames = 3
         self.swap_handedness = swap_handedness
         self.pulse_gestures = pulse_gestures
         self.scroll_repeat_rate_hz = scroll_repeat_rate_hz
@@ -206,69 +186,19 @@ class Pipeline:
         right_sm = GestureStateMachine("right", settings.gestures.right_hand)
         guard = TrackingLossGuard(left_sm, right_sm)
         j = settings.joystick
-        joystick_signal: Callable[[np.ndarray], np.ndarray]
-        left_joy: JoystickLike
-        right_joy: JoystickLike
-        if j.mode == "palm_tilt":
-            t = j.tilt
-            missing_tilt_neutral = t.left_neutral is None or t.right_neutral is None
-            if missing_tilt_neutral and not allow_uncalibrated_palm_normal:
-                raise ValueError(
-                    "Palm-tilt joystick requires calibration before live input. Run "
-                    "`mcv calibrate --apply` to write left/right neutral tilt vectors, or use "
-                    "`mcv run --no-input --debug-overlay` for an uncalibrated preview."
-                )
-            left_joy = PalmNormalJoystick(
-                t.left_neutral,
-                t.deadzone,
-                t.left_sensitivity,
-                j.max_output,
-                j.smoothing,
-                sensitivity_neg=t.left_sensitivity_neg,
-            )
-            right_joy = PalmNormalJoystick(
-                t.right_neutral,
-                t.deadzone,
-                t.right_sensitivity,
-                j.max_output,
-                j.smoothing,
-                sensitivity_neg=t.right_sensitivity_neg,
-            )
-            joystick_signal = palm_tilt_xy
-        elif j.mode == "palm_normal":
-            pn = j.palm_normal
-            missing_palm_neutral = pn.left_neutral is None or pn.right_neutral is None
-            if missing_palm_neutral and not allow_uncalibrated_palm_normal:
-                raise ValueError(
-                    "Palm-normal joystick requires calibration before live input. Run "
-                    "`mcv calibrate --apply` to write left/right neutral normals, or use "
-                    "`mcv run --no-input --debug-overlay` for an uncalibrated preview."
-                )
-            left_joy = PalmNormalJoystick(
-                pn.left_neutral,
-                pn.deadzone,
-                pn.left_sensitivity,
-                j.max_output,
-                j.smoothing,
-                sensitivity_neg=pn.left_sensitivity_neg,
-            )
-            right_joy = PalmNormalJoystick(
-                pn.right_neutral,
-                pn.deadzone,
-                pn.right_sensitivity,
-                j.max_output,
-                j.smoothing,
-                sensitivity_neg=pn.right_sensitivity_neg,
-            )
-            joystick_signal = palm_normal_xy
-        else:
-            left_joy = WristRotationJoystick(
-                j.deadzone_radius, j.sensitivity, j.max_output, j.smoothing
-            )
-            right_joy = WristRotationJoystick(
-                j.deadzone_radius, j.sensitivity, j.max_output, j.smoothing
-            )
-            joystick_signal = palm_xz
+        left_joy = ScreenJoystick(
+            j.deadzone,
+            j.left_sensitivity,
+            j.smoothing,
+            fixed_neutral=j.fixed_left_neutral,
+        )
+        right_joy = ScreenJoystick(
+            j.deadzone,
+            j.right_sensitivity,
+            j.smoothing,
+            fixed_neutral=j.fixed_right_neutral,
+        )
+        joystick_signal = screen_mcp_centroid
         look_filter = (
             OneEuroFilter(
                 min_cutoff=j.one_euro_min_cutoff,
@@ -305,10 +235,6 @@ class Pipeline:
             right_joystick=right_joy,
             bindings=dict(settings.bindings),
             joystick_signal=joystick_signal,
-            joystick_mode=j.mode,
-            anchor=j.anchor,
-            recenter_grace_frames=j.recenter_grace_frames,
-            cardinal_half_width=j.cardinal_half_width,
             swap_handedness=settings.tracking.swap_handedness,
             pulse_gestures=left_sm.pulse_gestures,
             scroll_repeat_rate_hz=settings.input.scroll_repeat_rate_hz,
@@ -359,10 +285,21 @@ class Pipeline:
         # Feed each hand's landmarks to its gesture machine only when that hand may emit
         # (NORMAL phase). Absent or stabilizing -> pass None so the machine resets: no stuck
         # keys, and no phantom presses fired during the re-entry settle window.
-        events = self.guard.process(
+        raw_events = self.guard.process(
             left_lm if left_dec.emit else None,
             right_lm if right_dec.emit else None,
         )
+        
+        events = []
+        for event in raw_events:
+            if event.gesture == "recenter" and event.action == KEY_DOWN:
+                if event.hand == "left" and left_lm is not None:
+                    self.left_joystick.recenter_at(self.joystick_signal(left_lm))
+                elif event.hand == "right" and right_lm is not None:
+                    self.right_joystick.recenter_at(self.joystick_signal(right_lm))
+                continue
+            events.append(event)
+
         for event in events:
             # In inventory mode, suppress new LEFT-hand gameplay actions (jump/sneak/
             # inventory/Q/F) so menu navigation can't fire them. KEY_UP still passes through so any
@@ -433,10 +370,9 @@ class Pipeline:
             inventory_active=False,
             left_signal=left_sig,
             right_signal=right_sig,
-            left_neutral=self.left_joystick.neutral.copy(),
-            right_neutral=self.right_joystick.neutral.copy(),
-            deadzone=getattr(self.left_joystick, "deadzone", 0.0),
-            cardinal_half_width=self.cardinal_half_width,
+            left_neutral=self.left_joystick.neutral.copy() if self.left_joystick.neutral is not None else None,
+            right_neutral=self.right_joystick.neutral.copy() if self.right_joystick.neutral is not None else None,
+            deadzone=self.left_joystick.deadzone,
             left_status=left_status,
             right_status=right_status,
         )
@@ -491,7 +427,7 @@ class Pipeline:
         """
         if self.sprint_trigger is None:
             return
-        z = float(landmarks[ANCHOR_INDEX[self.anchor]][2])
+        z = float(landmarks[0][2])  # 0 is the wrist
         token = self.sprint_trigger.update(z, now)
         key = self.bindings.get("sprint")
         if key is None:
@@ -504,34 +440,18 @@ class Pipeline:
             self._sprint_active = False
 
     def _update_cursor(self, landmarks: np.ndarray | None) -> np.ndarray:
-        """Map the right hand to an absolute cursor position (inventory mode).
-
-        In ``palm_tilt`` mode the cursor is a *tilt-to-point* pointer: the calibrated tilt
-        deviation (signal minus the right hand's neutral, scaled by its per-axis sensitivity)
-        is mapped about screen-center, so a full comfortable tilt spans the screen and a
-        resting hand sits at center. This is precise from a still, resting hand — unlike the
-        legacy mapping below, which keys off raw hand *position* and is twitchy when the hand
-        barely moves. Other modes keep the legacy anchor-position mapping.
-
-        Args:
-            landmarks: ``(21, 3)`` right-hand landmarks, or ``None`` if absent this frame.
-
-        Returns:
-            The ``(2,)`` normalized screen position commanded this frame, or zeros if the hand
-            is absent. Frame of reference: normalized screen coords (``y`` down), clamped to
-            ``[0, 1]``.
-        """
         if landmarks is None:
             return np.zeros(2, dtype=np.float64)
-        if self.joystick_mode == "palm_tilt":
-            signal = self.joystick_signal(landmarks)
-            neutral = self.right_joystick.neutral
-            sensitivity = self.right_joystick.sensitivity
-            norm_delta = np.clip((signal[:2] - neutral) * sensitivity, -1.0, 1.0)
-            screen = 0.5 + norm_delta * 0.5 * self.cursor_gain
-        else:
-            pos = anchor_xy(landmarks, self.anchor)
-            screen = 0.5 + (pos - 0.5) * self.cursor_gain
+        signal = self.joystick_signal(landmarks)
+        # We must call update to seed the neutral on first appearance.
+        # But we don't want the curved delta, we want the raw linear delta for the cursor.
+        self.right_joystick.update(signal)
+        neutral = self.right_joystick.neutral
+        if neutral is None:
+            return np.zeros(2, dtype=np.float64)
+        sensitivity = self.right_joystick.sensitivity
+        norm_delta = np.clip((signal[:2] - neutral) * sensitivity, -1.0, 1.0)
+        screen = 0.5 + norm_delta * 0.5 * self.cursor_gain
         screen = np.clip(screen, 0.0, 1.0)
         self.emitter.mouse_move_abs(float(screen[0]), float(screen[1]))
         return screen
@@ -569,8 +489,7 @@ class Pipeline:
             return self.left_joystick.zero()
         out = self.left_joystick.update(self.joystick_signal(landmarks))
         self._update_sprint(landmarks, now)
-        # Use cardinal-zone selection instead of independent per-axis sign checks.
-        target = cardinal_keys(out, self.cardinal_half_width, self.bindings)
+        target = self._wasd_targets(out)
         if self._sprint_active:
             # Sprint forces forward (W) held alongside Ctrl, even at joystick neutral.
             target.add(self.bindings["forward"])
@@ -608,12 +527,7 @@ class Pipeline:
         return out
 
     def _wasd_targets(self, output: np.ndarray) -> set[str]:
-        """Translate a joystick output vector into the set of WASD keys to hold.
-
-        Delegates to :func:`cardinal_keys` for angular zone selection; kept for backward
-        compatibility with code that calls this method directly.
-        """
-        return cardinal_keys(output, self.cardinal_half_width, self.bindings)
+        return octant_keys(output, self.bindings)
 
     def _apply_wasd(self, target: set[str]) -> None:
         for key in self._wasd_held - target:
@@ -837,66 +751,64 @@ def _draw_overlay(frame: np.ndarray, results: list[HandResult], step: StepResult
     wasd = "".join(sorted(step.wasd_held)) or "."
     cv2.putText(frame, f"WASD:{wasd}", (8, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
 
-    # --- Left-hand joystick gizmo (bottom-left) --------------------------------
-    lx = _GIZMO_MARGIN
-    ly = h - _GIZMO_MARGIN
-    _draw_joystick_gizmo(
-        frame,
-        cx=lx,
-        cy=ly,
-        scale=_GIZMO_SCALE,
-        signal=step.left_signal,
-        neutral=step.left_neutral,
-        output=np.array(step.left_output) if step.left_output is not None else None,
-        deadzone=step.deadzone,
-        half_width=step.cardinal_half_width,
-        wasd_held=step.wasd_held,
-        bindings_fwd_back_left_right=(
-            step.wasd_held,  # passed as held set; gizmo knows the key names
-        ),
-        status=step.left_status,
-        is_look=False,
-    )
+    # --- Left-hand joystick gizmo ----------------------------------------------
+    if step.left_neutral is not None:
+        _draw_joystick_gizmo(
+            frame,
+            w=w,
+            h=h,
+            signal=step.left_signal,
+            neutral=step.left_neutral,
+            output=np.array(step.left_output) if step.left_output is not None else None,
+            deadzone=step.deadzone,
+            wasd_held=step.wasd_held,
+            bindings_fwd_back_left_right=(
+                step.wasd_held,  # passed as held set; gizmo knows the key names
+            ),
+            status=step.left_status,
+            is_look=False,
+        )
 
-    # --- Right-hand look gizmo (bottom-right) ----------------------------------
-    rx = w - _GIZMO_MARGIN
-    ry = h - _GIZMO_MARGIN
-    _draw_joystick_gizmo(
-        frame,
-        cx=rx,
-        cy=ry,
-        scale=_GIZMO_SCALE,
-        signal=step.right_signal,
-        neutral=step.right_neutral,
-        output=np.array(step.right_output) if step.right_output is not None else None,
-        deadzone=step.deadzone,
-        half_width=step.cardinal_half_width,
-        wasd_held=step.wasd_held,
-        bindings_fwd_back_left_right=(step.wasd_held,),
-        status=step.right_status,
-        is_look=True,
-    )
+    # --- Right-hand look gizmo -------------------------------------------------
+    if step.right_neutral is not None:
+        _draw_joystick_gizmo(
+            frame,
+            w=w,
+            h=h,
+            signal=step.right_signal,
+            neutral=step.right_neutral,
+            output=np.array(step.right_output) if step.right_output is not None else None,
+            deadzone=step.deadzone,
+            wasd_held=step.wasd_held,
+            bindings_fwd_back_left_right=(step.wasd_held,),
+            status=step.right_status,
+            is_look=True,
+        )
 
 
 def _draw_joystick_gizmo(
     frame: np.ndarray,
     *,
-    cx: int,
-    cy: int,
-    scale: int,
+    w: int,
+    h: int,
     signal: np.ndarray | None,
     neutral: np.ndarray | None,
     output: np.ndarray | None,
     deadzone: float,
-    half_width: float,
     wasd_held: frozenset[str],
     bindings_fwd_back_left_right: tuple,
     status: HandStatus,
     is_look: bool,
 ) -> None:
-    """Draw one joystick gizmo (deadzone ring, zone wedges, live vector, labels, status)."""
+    """Draw one joystick gizmo exactly at the physical anchor point on the screen."""
     import cv2
     import math as _math
+
+    if neutral is None:
+        return
+
+    cx = int(neutral[0] * w)
+    cy = int(neutral[1] * h)
 
     # --- Status badge -----------------------------------------------------------
     label = _STATUS_LABEL[status]
@@ -904,71 +816,78 @@ def _draw_joystick_gizmo(
     cv2.putText(frame, label, (cx - 45, cy + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1)
 
     # --- Neutral dot ------------------------------------------------------------
-    cv2.circle(frame, (cx, cy), 4, (200, 200, 200), -1)
+    cv2.circle(frame, (cx, cy), 6, (200, 200, 200), -1)
 
-    # --- Deadzone ring ----------------------------------------------------------
-    dz_px = int(deadzone * scale)
-    if dz_px > 1:
-        cv2.circle(frame, (cx, cy), dz_px, _COL_IDLE, 1)
+    # --- Deadzone ellipse -------------------------------------------------------
+    # The deadzone is based on the normalized vector length.
+    # So the boundary is where `sqrt((dx)^2 + (dy)^2) == deadzone`.
+    # In pixel space, dx_px = dx * w, dy_px = dy * h.
+    # Thus the deadzone ring on screen is an ellipse with axes:
+    dz_px_x = int(deadzone * w)
+    dz_px_y = int(deadzone * h)
+    
+    if dz_px_x > 1 and dz_px_y > 1:
+        cv2.ellipse(frame, (cx, cy), (dz_px_x, dz_px_y), 0, 0, 360, _COL_IDLE, 1)
 
     if is_look:
-        # --- Look gizmo: simple arrow for the look vector -----------------------
+        # --- Look gizmo: simple arrow pointing in the output look direction ------
         if output is not None and (output[0] != 0.0 or output[1] != 0.0):
-            ox = int(output[0] * scale)
-            oy = int(-output[1] * scale)  # screen y is inverted
-            tip = (cx + ox, cy + oy)
-            cv2.arrowedLine(frame, (cx, cy), tip, _COL_LOOK, 2, tipLength=0.3)
+            # Scale the output purely for visual display
+            ox = int(output[0] * 50)
+            oy = int(-output[1] * 50)  # Visual inverted Y
+            cv2.arrowedLine(frame, (cx, cy), (cx + ox, cy + oy), _COL_LOOK, 2, tipLength=0.3)
+        
+        # Also draw tracking line to the hand
+        if signal is not None:
+            hx = int(signal[0] * w)
+            hy = int(signal[1] * h)
+            cv2.line(frame, (cx, cy), (hx, hy), (100, 100, 100), 1)
         return
 
     # --- WASD zone wedges (left-hand gizmo only) --------------------------------
-    # Cardinals: right=0°, forward=90°, left=180°, back=270° (using math convention).
-    # In screen coords y is down, so forward (+y joystick) points UP on screen.
-    firing_radius = 90.0 - half_width
-    cardinals = [
-        ("forward", 90.0, "w"),
-        ("left", 180.0, "a"),
-        ("back", -90.0, "s"),
-        ("right", 0.0, "d"),
-    ]
-    for _dir, angle_deg, key in cardinals:
-        active = key in wasd_held
-        color = _COL_ZONE_ACTIVE if active else _COL_ZONE
-        # Draw two boundary rays at ±firing_radius around the cardinal centre.
-        for offset in (-firing_radius, firing_radius):
-            ray_deg = angle_deg + offset
-            # Screen convention: x right, y down; forward (+y) maps to screen-up (-y).
-            rx = _math.cos(_math.radians(ray_deg)) * scale
-            ry = -_math.sin(_math.radians(ray_deg)) * scale  # flip y for screen
-            end = (int(cx + rx), int(cy + ry))
-            cv2.line(frame, (cx, cy), end, color, 1)
+    # Draw 8 slices representing the 45-degree octants. Boundaries are offset by 22.5 deg.
+    # The wedges radiate outward. Let's make them visibly large.
+    ray_len_x = int(0.12 * w)
+    ray_len_y = int(0.12 * h)
+    for i in range(8):
+        ray_deg = 22.5 + i * 45.0
+        # Octant math in pipeline uses standard atan2(dy, dx), where dy is inverted y.
+        rx = _math.cos(_math.radians(ray_deg)) * ray_len_x
+        ry = -_math.sin(_math.radians(ray_deg)) * ray_len_y  # flip y for screen
+        end = (int(cx + rx), int(cy + ry))
+        cv2.line(frame, (cx, cy), end, _COL_ZONE, 1)
 
-    # --- Live deviation vector arrow -------------------------------------------
-    if signal is not None and neutral is not None:
-        dev = signal[:2] - neutral[:2]
-        dx = int(dev[0] * scale)
-        dy = int(-dev[1] * scale)  # flip y
-        # Clamp to gizmo area
-        mag = _math.sqrt(dx * dx + dy * dy)
-        max_px = scale
-        if mag > max_px:
-            dx = int(dx * max_px / mag)
-            dy = int(dy * max_px / mag)
-        tip = (cx + dx, cy + dy)
+    # --- Live tracking line to hand ---------------------------------------------
+    if signal is not None:
+        hx = int(signal[0] * w)
+        hy = int(signal[1] * h)
         is_active = output is not None and (output[0] != 0.0 or output[1] != 0.0)
         col = _COL_ACTIVE if is_active else (160, 160, 160)
-        cv2.arrowedLine(frame, (cx, cy), tip, col, 2, tipLength=0.25)
+        cv2.arrowedLine(frame, (cx, cy), (hx, hy), col, 2, tipLength=0.1)
 
     # --- WASD key labels around gizmo -----------------------------------------
-    label_dist = scale + 16
+    label_dist_x = int(0.14 * w)
+    label_dist_y = int(0.14 * h)
     label_positions = {
-        "w": (cx, cy - label_dist),
-        "a": (cx - label_dist, cy),
-        "s": (cx, cy + label_dist),
-        "d": (cx + label_dist, cy),
+        "w": (cx, cy - label_dist_y),
+        "a": (cx - label_dist_x, cy),
+        "s": (cx, cy + label_dist_y),
+        "d": (cx + label_dist_x, cy),
     }
-    for key, (kx, ky) in label_positions.items():
-        col = _COL_WASD_ON if key in wasd_held else _COL_WASD
-        cv2.putText(frame, key.upper(), (kx - 5, ky + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
+
+    # Extract held keys
+    held_set = bindings_fwd_back_left_right[0]
+
+    for key, pos in label_positions.items():
+        if key in held_set:
+            lcol = _COL_ACTIVE
+            thick = 2
+        else:
+            lcol = (200, 200, 200)
+            thick = 1
+        # Shift text roughly to center
+        px, py = pos
+        cv2.putText(frame, key.upper(), (px - 5, py + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, lcol, thick)
 
 
 __all__ = ["Pipeline", "StepResult", "run_pipeline"]

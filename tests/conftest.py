@@ -67,8 +67,10 @@ def _build_extended_landmarks(
     extensions: dict[str, float] | None = None,
     thumb_ext: float = 0.5,
     scale: float = 0.2,
-    offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    offset: tuple[float, ...] = (0.0, 0.0, 0.0),
 ) -> np.ndarray:
+    if len(offset) == 2:
+        offset = (offset[0], offset[1], 0.0)
     """Build landmarks with controllable finger extension ratios."""
     lm = np.zeros((21, 3), dtype=np.float32)
     wrist = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -108,16 +110,14 @@ def _build_extended_landmarks(
     return lm + np.asarray(offset, dtype=np.float32)
 
 
-def _build_wrist_rotation_landmarks(
-    palm_x: float = 0.0,
-    palm_z: float = 0.0,
+def _build_screen_landmarks(
+    offset: tuple[float, ...] = (0.0, 0.0, 0.0),
     distances: Mapping[str, float] | None = None,
     extensions: dict[str, float] | None = None,
     thumb_ext: float = 1.3,
     scale: float = 0.2,
-    offset: tuple[float, float, float] = (0.4, 0.4, 0.0),
 ) -> np.ndarray:
-    """Build landmarks with controllable wrist-rotation palm vector and gestures."""
+    """Build landmarks where the MCP centroid tracks the given `offset`."""
     default_extensions = {"index": 1.3, "middle": 1.3, "ring": 1.3, "pinky": 1.3}
     if extensions:
         default_extensions.update(extensions)
@@ -125,99 +125,14 @@ def _build_wrist_rotation_landmarks(
         extensions=default_extensions,
         thumb_ext=thumb_ext,
         scale=scale,
-        offset=(0.0, 0.0, 0.0),
+        offset=offset,
     )
-    wrist = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-    lm[_WRIST] = wrist
-    lm[5] = np.array([(palm_x - 0.25) * scale, 0.80 * scale, palm_z * scale], dtype=np.float32)
-    lm[9] = np.array([palm_x * scale, scale, palm_z * scale], dtype=np.float32)
-    lm[17] = np.array([(palm_x + 0.25) * scale, 0.80 * scale, palm_z * scale], dtype=np.float32)
-    hand_scale = float(np.linalg.norm(lm[9] - lm[0]))
-    lm[4] = lm[5] + np.array([-thumb_ext * hand_scale, 0.0, 0.0], dtype=np.float32)
-
     if distances:
         thumb = lm[4]
         for finger, d in distances.items():
             direction = _DIRS[finger].astype(np.float32)
             lm[_TIP_INDEX[finger]] = thumb + direction * (d * scale)
-
-    return lm + np.asarray(offset, dtype=np.float32)
-
-
-def _build_palm_normal_landmarks(
-    normal_xy: tuple[float, float] = (0.0, 0.0),
-    distances: Mapping[str, float] | None = None,
-    extensions: dict[str, float] | None = None,
-    thumb_ext: float = 1.3,
-    scale: float = 0.2,
-    offset: tuple[float, float, float] = (0.4, 0.4, 0.0),
-) -> np.ndarray:
-    """Build landmarks whose palm plane has a controllable normal ``(x, y)``."""
-    default_extensions = {"index": 1.3, "middle": 1.3, "ring": 1.3, "pinky": 1.3}
-    if extensions:
-        default_extensions.update(extensions)
-    lm = _build_extended_landmarks(
-        extensions=default_extensions,
-        thumb_ext=thumb_ext,
-        scale=scale,
-        offset=(0.0, 0.0, 0.0),
-    )
-    x, y = normal_xy
-    z = np.sqrt(max(1e-6, 1.0 - x * x - y * y))
-    normal = np.asarray([x, y, z], dtype=np.float32)
-    normal = normal / np.linalg.norm(normal)
-
-    base_forward = np.asarray([0.0, 1.0, 0.0], dtype=np.float32)
-    if abs(float(np.dot(base_forward, normal))) > 0.95:
-        base_forward = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
-    forward = base_forward - normal * float(np.dot(base_forward, normal))
-    forward = forward / np.linalg.norm(forward)
-    across = np.cross(forward, normal)
-    across = across / np.linalg.norm(across)
-
-    lm[_WRIST] = np.zeros(3, dtype=np.float32)
-    lm[9] = forward * scale
-    lm[5] = forward * (0.8 * scale) - across * (0.25 * scale)
-    lm[17] = forward * (0.8 * scale) + across * (0.25 * scale)
-    hand_scale = float(np.linalg.norm(lm[9] - lm[0]))
-    lm[4] = lm[5] + np.asarray([-thumb_ext * hand_scale, 0.0, 0.0], dtype=np.float32)
-
-    if distances:
-        thumb = lm[4]
-        for finger, d in distances.items():
-            direction = _DIRS[finger].astype(np.float32)
-            lm[_TIP_INDEX[finger]] = thumb + direction * (d * scale)
-
-    return lm + np.asarray(offset, dtype=np.float32)
-
-
-def _build_tilt_landmarks(
-    tilt: tuple[float, float] = (0.0, 0.0),
-    depth: float = 1.0,
-    scale: float = 0.2,
-    offset: tuple[float, float, float] = (0.4, 0.4, 0.0),
-    fingertip: tuple[float, float, float] = (0.05, 0.05, 0.0),
-) -> np.ndarray:
-    """Build landmarks whose wrist->MCP-centroid vector has a controllable image ``(x, y)``.
-
-    The palm MCPs (5, 9, 17) are placed so their centroid equals ``(tx, ty, depth) * scale``
-    and the hand span (``|lm9 - wrist|``) equals its magnitude, so ``palm_tilt_xy`` returns
-    exactly ``(tx, ty) / sqrt(tx^2 + ty^2 + depth^2)`` — sign- and order-preserving in ``tx``
-    and ``ty`` (tilt right -> +x, tilt left -> -x; never collapsed). Fingertips (4, 8, 12, 16,
-    20) are placed at ``fingertip`` and never affect the tilt signal, so varying them models
-    finger curl / pinch.
-    """
-    tx, ty = tilt
-    lm = np.zeros((21, 3), dtype=np.float32)
-    center = np.asarray([tx, ty, depth], dtype=np.float32) * scale
-    across = np.asarray([0.25 * scale, 0.0, 0.0], dtype=np.float32)
-    lm[0] = (0.0, 0.0, 0.0)  # WRIST
-    lm[9] = center  # MIDDLE_MCP
-    lm[5] = center - across  # INDEX_MCP (mean of 5,9,17 stays exactly `center`)
-    lm[17] = center + across  # PINKY_MCP
-    for idx in (4, 8, 12, 16, 20):
-        lm[idx] = np.asarray(fingertip, dtype=np.float32)
-    return lm + np.asarray(offset, dtype=np.float32)
+    return lm
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -230,44 +145,34 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return out
 
 
-def make_calibrated_settings(**overrides: Any) -> Settings:
-    """Settings with palm-normal calibration filled in for pipeline tests."""
+def make_screen_settings(**overrides: Any) -> Settings:
+    """Settings with ScreenJoystick config for pipeline tests."""
     base: dict[str, Any] = {
         "joystick": {
-            "mode": "palm_normal",
-            "palm_normal": {
-                "left_neutral": (0.0, 0.0),
-                "right_neutral": (0.0, 0.0),
-                "deadzone": 0.05,
-                "left_sensitivity": (2.0, 2.0),
-                "right_sensitivity": (2.0, 2.0),
-            },
+            "deadzone": 0.08,
+            "left_sensitivity": 5.0,
+            "right_sensitivity": 5.0,
+            "look_accel_exponent": 1.0,  # linear for tests
+            "smoothing": 0.0,
+            "look_filter": "ema",
         }
     }
     return Settings(**_deep_merge(base, overrides))
 
 
-def make_tilt_calibrated_settings(**overrides: Any) -> Settings:
-    """Settings with knuckle-tilt (``palm_tilt``) calibration filled in for pipeline tests."""
-    base: dict[str, Any] = {
-        "joystick": {
-            "mode": "palm_tilt",
-            "tilt": {
-                "left_neutral": (0.0, 0.0),
-                "right_neutral": (0.0, 0.0),
-                "deadzone": 0.05,
-                "left_sensitivity": (2.0, 2.0),
-                "right_sensitivity": (2.0, 2.0),
-            },
-        }
-    }
-    return Settings(**_deep_merge(base, overrides))
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def make_landmarks() -> Callable[..., np.ndarray]:
-    """Return a builder: ``make_landmarks({"index": 0.2}, scale=0.2) -> (21, 3) array``."""
     return _build_landmarks
+
+
+@pytest.fixture
+def make_screen_landmarks() -> Callable[..., np.ndarray]:
+    return _build_screen_landmarks
 
 
 @pytest.fixture
@@ -276,22 +181,7 @@ def make_extended_landmarks() -> Callable[..., np.ndarray]:
     return _build_extended_landmarks
 
 
-@pytest.fixture
-def make_wrist_rotation_landmarks() -> Callable[..., np.ndarray]:
-    """Return a builder for wrist-rotation joystick tests."""
-    return _build_wrist_rotation_landmarks
 
-
-@pytest.fixture
-def make_palm_normal_landmarks() -> Callable[..., np.ndarray]:
-    """Return a builder for palm-normal joystick tests."""
-    return _build_palm_normal_landmarks
-
-
-@pytest.fixture
-def make_tilt_landmarks() -> Callable[..., np.ndarray]:
-    """Return a builder for knuckle-tilt joystick tests."""
-    return _build_tilt_landmarks
 
 
 @pytest.fixture
