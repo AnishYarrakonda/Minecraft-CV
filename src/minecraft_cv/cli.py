@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+# Prevent mediapipe from taking the GPU landmark-projection path when Qt has already
+# initialised OpenGL. Must be set before PySide6 / QApplication is created.
+os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
 
 import numpy as np
 

@@ -11,9 +11,10 @@ absent (the CLI) should guard the import and surface an install hint.
 from __future__ import annotations
 
 import sys
+import threading
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from minecraft_cv.runtime import FrameProcessor
 from minecraft_cv.ui import theme
 from minecraft_cv.ui.camera_view import CameraView
 from minecraft_cv.ui.panels import HeaderBar, KeymapPanel, MovementPanel
@@ -60,7 +62,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._settings = settings
         self._source = source
-        self._thread: QThread | None = None
+        self._thread: threading.Thread | None = None
         self._worker: PipelineWorker | None = None
 
         self.setWindowTitle("minecraft_cv")
@@ -111,14 +113,15 @@ class MainWindow(QMainWindow):
         if self._thread is not None:
             return
         self._worker = PipelineWorker(self._settings, source=self._source)
-        self._thread = QThread(self)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
+        # Use a Python thread, not QThread: QThread's GL context setup causes mediapipe
+        # to take a GPU landmark-projection path that crashes on macOS (SIGTRAP). Qt
+        # signals emitted from Python threads are queued safely through the event loop.
         self._worker.frame_ready.connect(self._on_frame)
         self._worker.error.connect(self._on_error)
         self._worker.started_ok.connect(lambda: self._header.set_running(True))
         self._worker.live_changed.connect(self._header.set_live)
         self._worker.stopped.connect(self._on_worker_stopped)
+        self._thread = threading.Thread(target=self._worker.run, daemon=True)
         self._thread.start()
         self._header.set_running(True)
 
@@ -134,8 +137,7 @@ class MainWindow(QMainWindow):
 
     def _on_worker_stopped(self) -> None:
         if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait()
+            self._thread.join(timeout=2.0)
             self._thread = None
         self._worker = None
         self._header.set_running(False)
@@ -143,8 +145,27 @@ class MainWindow(QMainWindow):
 
     # --- signals from the header --------------------------------------------
     def _on_live_toggled(self, enabled: bool) -> None:
-        if self._worker is not None:
-            self._worker.request_live(enabled)
+        if self._worker is None:
+            return
+        emitter = None
+        if enabled:
+            # Build the macOS input emitter HERE, on the GUI main thread. pynput's keyboard
+            # backend touches main-thread-only TIS APIs at construction; building it on the
+            # worker thread under the running Qt event loop SIGTRAPs the whole process. The
+            # worker then only installs the ready emitter (emission off-thread is safe).
+            try:
+                emitter = FrameProcessor.build_live_emitter(self._settings)
+            except Exception as exc:  # noqa: BLE001 - surface permission/import failure
+                QMessageBox.warning(
+                    self,
+                    "minecraft_cv",
+                    "Could not enable Live input. Grant Accessibility / Input Monitoring to "
+                    "your terminal in System Settings → Privacy & Security, then try again."
+                    f"\n\n{exc}",
+                )
+                self._header.set_live(False)
+                return
+        self._worker.request_live(enabled, emitter)
 
     def _on_calibrate(self) -> None:
         if self._worker is not None:
@@ -171,8 +192,7 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.request_stop()
         if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait()
+            self._thread.join(timeout=2.0)
             self._thread = None
         self._worker = None
         super().closeEvent(event)  # type: ignore[arg-type]

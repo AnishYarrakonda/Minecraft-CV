@@ -13,20 +13,34 @@ from __future__ import annotations
 
 # ruff: noqa: E402,I001
 
+import os
 import sys
 from pathlib import Path
+
+# Must be set before Qt (PySide6) initialises OpenGL. Qt's GL init makes mediapipe
+# detect GPU as available and take the GPU landmark-projection path, which then crashes
+# (SIGTRAP) when the graph runs on a non-main thread. Disabling GPU forces the CPU path.
+os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
-
+    sys.path.insert(0, str(SRC))dsdsds
 from minecraft_cv.cli import main as cli_main  # noqa: E402
 
 
 def main() -> int:
-    """Launch the desktop app, forwarding any extra CLI args (e.g. ``--config``)."""
-    return cli_main(["ui", *sys.argv[1:]])
+    """Launch the desktop app; fall back to headless debug overlay if PySide6 is absent."""
+    try:
+        import PySide6  # noqa: F401
+        return cli_main(["ui", *sys.argv[1:]])
+    except ImportError:
+        print(
+            "[main.py] PySide6 not found — launching headless mode (--no-input --debug-overlay).\n"
+            "          To get the full desktop app:  pip install PySide6\n",
+            file=sys.stderr,
+        )
+        return cli_main(["run", "--no-input", "--debug-overlay", *sys.argv[1:]])
 
 
 if __name__ == "__main__":

@@ -17,9 +17,6 @@ from typing import Any
 
 import numpy as np
 
-# Silence MediaPipe C++ glog warnings (e.g. NORM_RECT without IMAGE_DIMENSIONS)
-os.environ["GLOG_MINLOGLEVEL"] = "2"
-
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
 
 _NUM_LANDMARKS = 21
@@ -70,6 +67,8 @@ class MediaPipeHandTracker(HandTracker):
             RuntimeError: If MediaPipe is not importable.
         """
         try:
+            # Must be set before the C extension initialises glog — too late at module level.
+            os.environ.setdefault("GLOG_MINLOGLEVEL", "2")
             import mediapipe as mp
             from mediapipe.tasks import python as mp_python
             from mediapipe.tasks.python import vision as mp_vision
@@ -80,8 +79,14 @@ class MediaPipeHandTracker(HandTracker):
             ) from exc
 
         model_path = _ensure_model()
+        # Force CPU delegate: mediapipe ≥0.10.14 defaults to GPU on Apple Silicon,
+        # which tries to create a Metal/GL context on the worker thread — fatal on
+        # macOS when Qt already owns the main-thread GL context (SIGTRAP).
         options = mp_vision.HandLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=str(model_path)),
+            base_options=mp_python.BaseOptions(
+                model_asset_path=str(model_path),
+                delegate=mp_python.BaseOptions.Delegate.CPU,
+            ),
             running_mode=mp_vision.RunningMode.VIDEO,
             num_hands=max_num_hands,
             min_hand_detection_confidence=min_detection_confidence,

@@ -232,29 +232,56 @@ class FrameProcessor:
         """Whether real OS input is currently being emitted."""
         return self._live
 
-    def set_live(self, enabled: bool) -> None:
-        """Swap the pipeline emitter between Dry-Run (``NullEmitter``) and Live (macOS).
+    @staticmethod
+    def build_live_emitter(settings: Settings) -> InputEmitter:
+        """Construct the real macOS input emitter.
+
+        **Must be called on the GUI main thread.** pynput's macOS keyboard backend queries
+        main-thread-only Text-Input-Source (TIS) / keyboard-layout APIs at ``Controller``
+        construction; building it on a worker thread while a Cocoa/Qt event loop is running
+        hard-crashes the process with SIGTRAP. The headless CLI runs the whole pipeline on the
+        main thread, so :meth:`set_live` may build it lazily there; the Qt app pre-builds it on
+        the main thread and passes it into :meth:`set_live`.
 
         Args:
-            enabled: ``True`` to emit real keyboard/mouse input; ``False`` for a safe no-op.
+            settings: Loaded configuration (mouse scale, key-repeat guard).
+
+        Returns:
+            A ready :class:`MacInputEmitter`.
 
         Raises:
             Exception: If the macOS input backend cannot be created (e.g. missing Accessibility
                 permission). The caller should surface this and stay in Dry-Run.
         """
-        emitter: InputEmitter
-        if enabled:
-            from minecraft_cv.input.mac_emitter import MacInputEmitter
+        from minecraft_cv.input.mac_emitter import MacInputEmitter
 
-            emitter = MacInputEmitter(
-                mouse_delta_scale=self.settings.input.mouse_delta_scale,
-                key_repeat_guard_ms=self.settings.input.key_repeat_guard_ms,
+        return MacInputEmitter(
+            mouse_delta_scale=settings.input.mouse_delta_scale,
+            key_repeat_guard_ms=settings.input.key_repeat_guard_ms,
+        )
+
+    def set_live(self, enabled: bool, emitter: InputEmitter | None = None) -> None:
+        """Swap the pipeline emitter between Dry-Run (``NullEmitter``) and Live (macOS).
+
+        Args:
+            enabled: ``True`` to emit real keyboard/mouse input; ``False`` for a safe no-op.
+            emitter: A pre-built live emitter to install (Qt app path — built on the GUI main
+                thread via :meth:`build_live_emitter`). If ``None`` and ``enabled`` is true, one
+                is built here; only safe when this runs on the main thread (headless CLI).
+
+        Raises:
+            Exception: If ``emitter`` is ``None`` and the macOS backend cannot be created.
+        """
+        new_emitter: InputEmitter
+        if enabled:
+            new_emitter = emitter if emitter is not None else self.build_live_emitter(
+                self.settings
             )
         else:
             from minecraft_cv.input.emitter import NullEmitter
 
-            emitter = NullEmitter()
-        self.pipeline.set_emitter(emitter)
+            new_emitter = NullEmitter()
+        self.pipeline.set_emitter(new_emitter)
         self._live = enabled
 
     def shutdown(self) -> None:

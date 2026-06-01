@@ -9,16 +9,18 @@ thread via simple flags and applied at the top of the loop on this thread.
 from __future__ import annotations
 
 import contextlib
+import time
 import threading
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Signal
 
 from minecraft_cv.runtime import FrameProcessor
 
 if TYPE_CHECKING:
     from minecraft_cv.capture.source import FrameSource
     from minecraft_cv.config import Settings
+    from minecraft_cv.input.emitter import InputEmitter
 
 
 class PipelineWorker(QObject):
@@ -43,6 +45,7 @@ class PipelineWorker(QObject):
         self._stop = threading.Event()
         self._recenter_pending = False
         self._live_pending: bool | None = None
+        self._pending_emitter: InputEmitter | None = None
 
     def request_stop(self) -> None:
         """Ask the loop to finish and shut down (thread-safe)."""
@@ -52,8 +55,17 @@ class PipelineWorker(QObject):
         """Ask the pipeline to recenter both joysticks (thread-safe)."""
         self._recenter_pending = True
 
-    def request_live(self, enabled: bool) -> None:
-        """Ask to switch Live/Dry-Run input mode (thread-safe)."""
+    def request_live(self, enabled: bool, emitter: InputEmitter | None = None) -> None:
+        """Ask to switch Live/Dry-Run input mode (thread-safe).
+
+        Args:
+            enabled: Target mode (``True`` = Live).
+            emitter: When enabling, the live emitter **already built on the GUI main thread**
+                (see :meth:`FrameProcessor.build_live_emitter`). The worker only installs it —
+                it must never construct the macOS emitter itself (worker-thread construction
+                SIGTRAPs under the running Qt event loop).
+        """
+        self._pending_emitter = emitter
         self._live_pending = enabled
 
     def run(self) -> None:
@@ -74,15 +86,13 @@ class PipelineWorker(QObject):
                     processor.recenter()
                 if self._live_pending is not None:
                     want, self._live_pending = self._live_pending, None
+                    emitter, self._pending_emitter = self._pending_emitter, None
                     if want != processor.live:
+                        # The emitter was built on the GUI main thread; we only install it.
                         try:
-                            processor.set_live(want)
-                        except Exception as exc:  # noqa: BLE001 - permission/import failure
-                            self.error.emit(
-                                "Could not enable Live input. Grant Accessibility / Input "
-                                "Monitoring to your terminal in System Settings → Privacy & "
-                                f"Security, then try again.\n\n{exc}"
-                            )
+                            processor.set_live(want, emitter=emitter)
+                        except Exception as exc:  # noqa: BLE001 - defensive; install shouldn't raise
+                            self.error.emit(f"Could not switch input mode.\n\n{exc}")
                     self.live_changed.emit(processor.live)
 
                 if processor.error is not None:
@@ -96,7 +106,7 @@ class PipelineWorker(QObject):
                 if packet is None:
                     if processor.exhausted:
                         break
-                    QThread.msleep(2)
+                    time.sleep(0.002)
                     continue
                 self.frame_ready.emit(packet)
         finally:
