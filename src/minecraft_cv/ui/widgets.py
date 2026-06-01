@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from minecraft_cv.ui import theme
 
-_DARK_ON_ACCENT = "#08120C"
+_DARK_ON_ACCENT = "#FFFFFF"
 
 
 class KeyCap(QWidget):

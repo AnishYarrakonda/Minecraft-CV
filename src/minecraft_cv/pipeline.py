@@ -427,6 +427,16 @@ class Pipeline:
             self.emitter.mouse_stop()
             return self.right_joystick.zero()
         signal = self.right_joystick_signal(landmarks)
+        # Smooth the thumb *position* with the velocity-adaptive One-Euro filter before
+        # differencing, then drive the camera from the motion of the smoothed point. Raw
+        # frame-to-frame thumb deltas carry MediaPipe landmark jitter and frame-rate hitches
+        # straight to the mouse, which reads as a sputtery "start-stop" look. One-Euro cuts
+        # that jitter hard at rest yet barely lags fast looks. Because successive filtered
+        # positions telescope, the total emitted motion still equals the thumb's true
+        # displacement (unity DC gain): the same look, merely spread smoothly across a few
+        # frames so it glides to a stop instead of stuttering frame by frame.
+        if self.look_filter is not None:
+            signal = self.look_filter.filter(signal, now)
         if self._right_cursor_prev is None:
             self._seed_right_cursor(signal)
             self.emitter.mouse_stop()

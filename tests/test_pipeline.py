@@ -243,3 +243,79 @@ def test_right_peace_clutches_mouse_and_recenters_thumb_while_held(
     assert np.allclose(held.right_output, np.zeros(2))
     assert np.allclose(pipe.right_joystick.neutral, pipe.right_joystick_signal(peace_b))
     assert not any(event[0] == "mouse_move" for event in null_emitter.log[log_start:])
+
+
+def _one_euro_look_pipeline(emitter: NullEmitter) -> tuple[Pipeline, float]:
+    """Pipeline with the One-Euro look filter active and a deterministic 30 FPS clock.
+
+    Returns the pipeline and the per-frame ``dt`` so tests can reason about the filter.
+    """
+    settings = make_screen_settings(
+        joystick={
+            "deadzone": 0.08,
+            "left_sensitivity": 5.0,
+            "right_sensitivity": 5.0,
+            "look_accel_exponent": 1.0,
+            "smoothing": 0.0,
+            "right_smoothing": 0.0,
+            "look_filter": "one_euro",
+        }
+    )
+    settings.joystick.fixed_left_neutral = None
+    settings.joystick.fixed_right_neutral = None
+    pipe = Pipeline.from_settings(settings, emitter=emitter)
+    dt = 1.0 / 30.0
+    state = {"t": 0.0}
+
+    def clock() -> float:
+        state["t"] += dt
+        return state["t"]
+
+    pipe._clock = clock
+    return pipe, dt
+
+
+def test_right_look_one_euro_smooths_spike_and_glides_past_frame(
+    null_emitter: NullEmitter,
+    make_screen_landmarks: Callable[..., np.ndarray],
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    """A single thumb jump must not be emitted as one raw delta then stop dead.
+
+    With the One-Euro look filter active, the smoothed thumb point drives the camera:
+    the spike frame is attenuated and the motion continues (glides) over subsequent
+    frames while the hand holds still, instead of the sputtery one-frame-on/one-frame-off
+    behaviour. Because successive filtered positions telescope, the total emitted motion
+    still equals the thumb's true displacement (unity DC gain).
+    """
+    pipe, _dt = _one_euro_look_pipeline(null_emitter)
+    sens = 5.0
+
+    right_base = make_screen_landmarks(offset=(0.65, 0.25), thumb_ext=1.1)
+    for _ in range(5):
+        pipe.step([make_hand_result(right_base, "Left")])
+
+    jump = right_base.copy()
+    jump[4, :2] += np.array([0.20, 0.0], dtype=np.float32)
+    raw_dx = 0.20 * sens  # what an unfiltered single-frame delta would emit
+
+    spike = pipe.step([make_hand_result(jump, "Left")])
+    spike_dx = float(spike.right_output[0])
+
+    # The spike frame is smoothed, not a full raw jump.
+    assert 0.0 < spike_dx < raw_dx * 0.5
+
+    # Holding still, the look keeps gliding for several frames (motion extended past
+    # the single jump frame) rather than stopping dead.
+    total = spike_dx
+    glide_frames = 0
+    for _ in range(60):
+        res = pipe.step([make_hand_result(jump, "Left")])
+        dx = float(res.right_output[0])
+        if dx > 1e-9:
+            glide_frames += 1
+        total += dx
+
+    assert glide_frames >= 3
+    # Total emitted look motion converges to the true thumb displacement.
+    assert total == pytest.approx(raw_dx, rel=0.05)

@@ -9,8 +9,8 @@ thread via simple flags and applied at the top of the loop on this thread.
 from __future__ import annotations
 
 import contextlib
-import time
 import threading
+import time
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal

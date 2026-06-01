@@ -12,30 +12,30 @@ from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
 # --- Color tokens (hex) ------------------------------------------------------
-BG = "#0E1116"          # window background (near-black charcoal)
-BG_ELEV = "#141921"     # slightly raised surface
-PANEL = "#171C24"       # frosted-glass card body
-PANEL_HI = "#1C222C"    # hover / elevated card
-BORDER = "#262E39"      # hairline border
-BORDER_HI = "#333D4A"   # brighter border (hover/focus)
-TEXT = "#E6EAF0"        # primary text
-MUTED = "#8A94A2"       # secondary text / inactive labels
-FAINT = "#5A6470"       # tertiary text
-ACCENT = "#2BD576"      # primary accent (emerald) — Dry-Run / OK / engaged
-MOVE = "#56DAFF"        # left hand / movement (cyan)
-LOOK = "#A78BFA"        # right hand / look (violet)
-LIVE = "#FF5C5C"        # Live input (red)
-WARN = "#FFB454"        # stabilizing / warning (amber)
-IDLE = "#2A313B"        # inactive indicator fill
+BG = "#09090B"          # window background (zinc-950)
+BG_ELEV = "#111113"     # slightly raised surface
+PANEL = "#18181B"       # card body (zinc-900)
+PANEL_HI = "#1F1F23"    # hover / elevated card
+BORDER = "#27272A"      # hairline border (zinc-800)
+BORDER_HI = "#3F3F46"   # brighter border (hover/focus, zinc-700)
+TEXT = "#FAFAFA"        # primary text (zinc-50)
+MUTED = "#A1A1AA"       # secondary text / inactive labels (zinc-400)
+FAINT = "#52525B"       # tertiary text (zinc-600)
+ACCENT = "#3B82F6"      # primary accent (blue-500)
+MOVE = "#60A5FA"        # left hand / movement (blue-400)
+LOOK = "#818CF8"        # right hand / look (indigo-400)
+LIVE = "#EF4444"        # Live input (red-500)
+WARN = "#F59E0B"        # stabilizing / warning (amber-500)
+IDLE = "#27272A"        # inactive indicator fill (zinc-800)
 
 # --- Fonts -------------------------------------------------------------------
 UI_FONTS = '"SF Pro Text", "Inter", "Helvetica Neue", "Segoe UI", sans-serif'
 MONO_FONTS = '"SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace'
 
 # --- Geometry ----------------------------------------------------------------
-RADIUS_CARD = 14
-RADIUS_CAP = 9
-SIDEBAR_WIDTH = 340
+RADIUS_CARD = 8
+RADIUS_CAP = 6
+SIDEBAR_WIDTH = 320
 
 
 def color(hex_str: str, alpha: int = 255) -> QColor:
@@ -51,61 +51,62 @@ def _stylesheet() -> str:
         background: transparent;
         color: {TEXT};
         font-family: {UI_FONTS};
-        font-size: 13px;
+        font-size: 12px;
     }}
     QMainWindow, #Root {{
         background: {BG};
     }}
     #Card {{
         background: {PANEL};
-        border: 1px solid {BORDER};
+        border: none;
         border-radius: {RADIUS_CARD}px;
     }}
     #CardTitle {{
         color: {MUTED};
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 2px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
     }}
     #HeaderTitle {{
         color: {TEXT};
-        font-size: 16px;
-        font-weight: 700;
-        letter-spacing: 0.5px;
+        font-size: 14px;
+        font-weight: 600;
     }}
     #HeaderBar {{
-        background: {BG_ELEV};
+        background: {BG};
         border-bottom: 1px solid {BORDER};
     }}
-    #RowName {{ color: {TEXT}; font-size: 13px; font-weight: 600; }}
+    #RowName {{ color: {TEXT}; font-size: 12px; font-weight: 500; }}
     #RowFinger {{ color: {FAINT}; font-size: 11px; }}
-    #FpsLabel {{ color: {MUTED}; font-family: {MONO_FONTS}; font-size: 12px; }}
+    #FpsLabel {{ color: {FAINT}; font-family: {MONO_FONTS}; font-size: 11px; }}
     QPushButton {{
-        background: {PANEL};
+        background: transparent;
         color: {TEXT};
         border: 1px solid {BORDER};
-        border-radius: 9px;
-        padding: 7px 14px;
+        border-radius: 6px;
+        padding: 5px 12px;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 500;
     }}
     QPushButton:hover {{ background: {PANEL_HI}; border-color: {BORDER_HI}; }}
     QPushButton:pressed {{ background: {BG_ELEV}; }}
     QPushButton:disabled {{ color: {FAINT}; border-color: {BORDER}; }}
     QPushButton#PrimaryButton {{
-        background: {ACCENT}; color: #0A0E0C; border: none;
+        background: {ACCENT}; color: #FFFFFF; border: none; font-weight: 600;
     }}
-    QPushButton#PrimaryButton:hover {{ background: #34E483; }}
+    QPushButton#PrimaryButton:hover {{ background: #2563EB; }}
+    QPushButton#PrimaryButton:pressed {{ background: #1D4ED8; }}
     QPushButton#LiveButton[live="true"] {{
-        background: {LIVE}; color: #1A0606; border: none;
+        background: {LIVE}; color: #FFFFFF; border: none;
     }}
-    QPushButton#LiveButton[live="true"]:hover {{ background: #FF7070; }}
+    QPushButton#LiveButton[live="true"]:hover {{ background: #DC2626; }}
     QPushButton#PinButton[pinned="true"] {{
-        background: {MOVE}; color: #04141A; border: none;
+        background: transparent; color: {ACCENT}; border-color: {ACCENT};
     }}
     QToolTip {{
-        background: {BG_ELEV}; color: {TEXT};
-        border: 1px solid {BORDER_HI}; border-radius: 6px; padding: 4px 7px;
+        background: {PANEL}; color: {TEXT};
+        border: 1px solid {BORDER_HI}; border-radius: 6px; padding: 4px 8px;
+        font-size: 12px;
     }}
     """
 
@@ -129,7 +130,7 @@ def apply_theme(app: QApplication) -> None:
 
     font = QFont()
     font.setStyleHint(QFont.StyleHint.SansSerif)
-    font.setPointSize(13)
+    font.setPointSize(12)
     app.setFont(font)
 
     app.setStyleSheet(_stylesheet())

@@ -137,7 +137,11 @@ class MainWindow(QMainWindow):
 
     def _on_worker_stopped(self) -> None:
         if self._thread is not None:
-            self._thread.join(timeout=2.0)
+            # Join unbounded: request_stop() has been set, so the loop exits after at most one
+            # process_once, and the worker's `finally: processor.shutdown()` must run to release
+            # any held input. A timeout here could abandon the daemon worker mid-gesture and
+            # leave a key stuck down in-game.
+            self._thread.join()
             self._thread = None
         self._worker = None
         self._header.set_running(False)
@@ -192,7 +196,9 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.request_stop()
         if self._thread is not None:
-            self._thread.join(timeout=2.0)
+            # Unbounded join so the worker's shutdown (which releases all held input) always
+            # runs before the process exits — never abandon a Live worker with keys held down.
+            self._thread.join()
             self._thread = None
         self._worker = None
         super().closeEvent(event)  # type: ignore[arg-type]

@@ -25,7 +25,7 @@ os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))dsdsds
+    sys.path.insert(0, str(SRC))
 from minecraft_cv.cli import main as cli_main  # noqa: E402
 
 
