@@ -163,8 +163,8 @@ class StatusPill(QWidget):
 class HealthChip(QWidget):
     """Per-hand tracking-health chip: ``L OK`` / ``R SETTLING`` / ``L NO HAND``."""
 
-    _LABELS = {"normal": "OK", "stabilizing": "SETTLING", "absent": "NO HAND"}
-    _COLORS = {"normal": theme.ACCENT, "stabilizing": theme.WARN, "absent": theme.FAINT}
+    _LABELS = {"normal": "OK", "stabilizing": "SETTLING", "absent": "ABSENT", "tracking": "OK"}
+    _COLORS = {"normal": theme.ACCENT, "stabilizing": theme.WARN, "absent": theme.FAINT, "tracking": theme.ACCENT}
 
     def __init__(self, hand_letter: str, parent: QWidget | None = None) -> None:
         """Create a chip labeled for one hand (``"L"`` or ``"R"``)."""
