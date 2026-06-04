@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -168,9 +169,45 @@ class KeymapPanel(QWidget):
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         """Build the keymap from ``settings`` (bindings + gesture config)."""
         super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
+        main_lay = QVBoxLayout(self)
+        main_lay.setContentsMargins(0, 0, 0, 0)
+        main_lay.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        # Transparent background and a custom scrollbar so it doesn't overlap content on macOS
+        scroll.setStyleSheet("""
+            QScrollArea { background: transparent; }
+            QWidget#KeymapScrollContent { background: transparent; }
+            QScrollBar:vertical {
+                border: none;
+                background: rgba(255, 255, 255, 0.05);
+                width: 8px;
+                border-radius: 4px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                border: none;
+                background: none;
+            }
+        """)
+
+        content = QWidget()
+        content.setObjectName("KeymapScrollContent")
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(0, 0, 8, 0) # 8px right margin so the scrollbar fits neatly
         lay.setSpacing(14)
+
         self._rows: dict[tuple[str, str], _KeymapRow] = {}
 
         cards = {
@@ -186,6 +223,10 @@ class KeymapPanel(QWidget):
         lay.addWidget(cards["left"])
         lay.addWidget(cards["right"])
         lay.addWidget(cards["face"])
+        lay.addStretch(1)
+
+        scroll.setWidget(content)
+        main_lay.addWidget(scroll)
 
     def update_state(self, step: StepResult) -> None:
         """Light each row whose gesture is currently held."""
