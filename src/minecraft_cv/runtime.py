@@ -86,6 +86,10 @@ class FrameProcessor:
         self._small_bgr = np.empty((res_h, res_w, 3), dtype=np.uint8)
         self._small_rgb = np.empty((res_h, res_w, 3), dtype=np.uint8)
         self._res = (res_w, res_h)
+        
+        # Pre-allocate full-res RGB frame for face tracking
+        cam_w, cam_h = settings.camera.width, settings.camera.height
+        self._full_rgb = np.empty((cam_h, cam_w, 3), dtype=np.uint8)
         self._mirror = settings.camera.mirror
         self._live = settings.input.enabled
 
@@ -217,7 +221,9 @@ class FrameProcessor:
         if self.face_tracker is not None:
             # Face tracking also wants timestamp in ms
             ts_ms = int(time.monotonic() * 1000)
-            face_result = self.face_tracker.detect(self._small_rgb, ts_ms)
+            # Use full-resolution frame for face tracking to avoid 256x256 squashing which breaks face detection
+            cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=self._full_rgb)
+            face_result = self.face_tracker.detect(self._full_rgb, ts_ms)
             
         step = self.pipeline.step(results, face_result)
         self.processed += 1

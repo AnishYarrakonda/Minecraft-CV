@@ -55,6 +55,7 @@ class FaceTracker:
             running_mode=VisionRunningMode.VIDEO,
             num_faces=1,
             min_face_detection_confidence=min_detection_confidence,
+            min_face_presence_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence,
             output_face_blendshapes=True,
         )
