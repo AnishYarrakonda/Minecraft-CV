@@ -26,18 +26,6 @@ gestures:
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-    inventory:
-      detector: pinch
-      finger: middle
-      mode: hold
-      t_engage: 0.3
-      t_release: 0.45
-    throw_item:
-      detector: pinch
-      finger: ring
-      mode: hold
-      t_engage: 0.3
-      t_release: 0.45
     sneak:
       detector: pinch
       finger: pinky
@@ -59,8 +47,6 @@ gestures:
       suppresses:
       - jump
       - sneak
-      - inventory
-      - throw_item
   right_hand:
     attack:
       detector: pinch
@@ -107,6 +93,30 @@ gestures:
       - use
       - hotbar_next
       - hotbar_prev
+  face:
+    inventory:
+      blendshape: browInnerUp
+      t_engage: 0.5
+      t_release: 0.3
+      engage_frames: 3
+    throw_item:
+      blendshape: jawOpen
+      t_engage: 0.6
+      t_release: 0.35
+      engage_frames: 2
+    swap_offhand:
+      blendshape: eyeBlinkLeft
+      t_engage: 0.5
+      t_release: 0.3
+      engage_frames: 3
+
+face_tracking:
+  enabled: true
+  model_path: models/face_landmarker.task
+  device: cpu
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+
 joystick:
   deadzone: 0.08
   left_sensitivity: 5.0
@@ -128,6 +138,8 @@ bindings:
   sneak: shift
   inventory: e
   throw_item: q
+  swap_offhand: f
+
   attack: mouse_left
   use: mouse_right
   hotbar_next: scroll_up

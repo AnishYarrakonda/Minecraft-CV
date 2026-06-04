@@ -24,8 +24,9 @@ from minecraft_cv.gestures.registry import GestureStateMachine
 from minecraft_cv.gestures.safety import AnyGestureEvent, TrackingLossGuard
 from minecraft_cv.input.emitter import InputEmitter, create_emitter
 from minecraft_cv.joystick.one_euro import OneEuroFilter
-from minecraft_cv.joystick.screen import ScreenJoystick, screen_mcp_centroid, screen_thumb_tip
+from minecraft_cv.joystick.screen import ScreenJoystick, screen_index_mcp, screen_thumb_tip
 from minecraft_cv.joystick.steering import octant_keys
+from minecraft_cv.joystick.wrist_tilt import WristTiltJoystick, wrist_tilt_vector
 from minecraft_cv.recovery import HandRecovery, RecoveryDecision
 from minecraft_cv.tracking.tracker import HandResult
 
@@ -64,6 +65,8 @@ class StepResult:
     """Left-hand logical gestures currently held by the detector layer."""
     right_gestures: frozenset[str] = field(default_factory=frozenset)
     """Right-hand logical gestures currently held by the detector layer."""
+    face_gestures: frozenset[str] = field(default_factory=frozenset)
+    """Face logical gestures currently held by the detector layer."""
     relocalized_hands: frozenset[str] = field(default_factory=frozenset)
     """Hands whose joystick neutral was relocalized on this frame."""
 
@@ -83,6 +86,8 @@ class StepResult:
     """Tracking state of the left hand: ``normal``, ``stabilizing``, or ``absent``."""
     right_status: HandStatus = "absent"
     """Tracking state of the right hand: ``normal``, ``stabilizing``, or ``absent``."""
+    face_status: Literal["tracking", "absent"] = "absent"
+    """Tracking state of the face."""
 
 
 class Pipeline:
@@ -91,13 +96,15 @@ class Pipeline:
     def __init__(
         self,
         emitter: InputEmitter,
-        guard: TrackingLossGuard,
+        bindings: dict[str, str],
         left_joystick: JoystickLike,
         right_joystick: JoystickLike,
-        bindings: dict[str, str],
-        joystick_signal: Callable[[np.ndarray], np.ndarray] | None = None,
-        left_joystick_signal: Callable[[np.ndarray], np.ndarray] | None = None,
-        right_joystick_signal: Callable[[np.ndarray], np.ndarray] | None = None,
+        left_sm: GestureStateMachine,
+        right_sm: GestureStateMachine,
+        face_sm: FaceGestureStateMachine | None = None,
+        guard: TrackingLossGuard | None = None,
+        left_joystick_signal: Callable[[np.ndarray], np.ndarray] = wrist_tilt_vector,
+        right_joystick_signal: Callable[[np.ndarray], np.ndarray] = screen_index_mcp,
         swap_handedness: bool = True,
         scroll_repeat_rate_hz: float = 8.0,
         look_filter: OneEuroFilter | None = None,
@@ -107,41 +114,17 @@ class Pipeline:
         clock: Callable[[], float] = time.perf_counter,
         look_accel_exponent: float = 1.6,
     ) -> None:
-        """Assemble a pipeline from already-constructed components.
-
-        Args:
-            emitter: OS-input emitter (``NullEmitter`` for tests/dry-runs).
-            guard: Tracking-loss guard wrapping both hands' gesture state machines.
-            left_joystick: Left-hand joystick (-> WASD).
-            right_joystick: Right-hand gain holder / HUD surface for relative mouse move.
-            bindings: Map of gesture/direction name -> OS key name.
-            joystick_signal: Legacy signal extractor passed into both joysticks when the
-                per-hand extractors are omitted.
-            left_joystick_signal: Landmark signal extractor for movement.
-            right_joystick_signal: Landmark signal extractor for mouse look/cursor motion.
-            swap_handedness: If True, invert MediaPipe L/R labels in ``_split``.
-            scroll_repeat_rate_hz: Repeat rate for hotbar scroll while pinch is held.
-            look_filter: Legacy smoothing filter retained for reset compatibility.
-            left_recovery: Per-hand tracking-loss recovery controller for the left hand
-                (Task 5). ``None`` builds a default one.
-            right_recovery: As above for the right hand.
-            min_emit_confidence: Drop detected hands whose handedness score is below this in
-                :meth:`_split` (they are then treated as absent by the recovery path).
-            clock: Monotonic seconds source; injectable for deterministic tests. Used for
-                scroll-repeat timing, the look filter, and recovery windows.
-            look_accel_exponent: Ease-in exponent for the exponential acceleration curve
-                applied to the mouse-look output. ``> 1`` keeps small tilts precise and
-                large tilts fast; ``1.0`` is a linear pass-through.
-        """
+        """Initialize the pipeline with all constituent processors."""
         self.emitter = emitter
-        self.guard = guard
+        self.bindings = bindings
         self.left_joystick = left_joystick
         self.right_joystick = right_joystick
-        self.bindings = bindings
-        self.left_joystick_signal = left_joystick_signal or joystick_signal or screen_mcp_centroid
-        self.right_joystick_signal = right_joystick_signal or joystick_signal or screen_thumb_tip
-        # Backwards-compatible alias for tests/tools that inspect the movement signal.
-        self.joystick_signal = self.left_joystick_signal
+        self.left_sm = left_sm
+        self.right_sm = right_sm
+        self.face_sm = face_sm
+        self.guard = guard or TrackingLossGuard(left_sm, right_sm)
+        self.left_joystick_signal = left_joystick_signal
+        self.right_joystick_signal = right_joystick_signal
         self.recenter_grace_frames = 3
         self.swap_handedness = swap_handedness
         self.scroll_repeat_rate_hz = scroll_repeat_rate_hz
@@ -155,7 +138,6 @@ class Pipeline:
         self._right_miss = 0
         self._right_cursor_prev: np.ndarray | None = None
         self._look_accel_exponent = look_accel_exponent
-        # Scroll repeat state: track last scroll time per direction for rate limiting.
         self._last_scroll_time: dict[str, float] = {}
 
     @classmethod
@@ -165,27 +147,20 @@ class Pipeline:
         emitter: InputEmitter | None = None,
         allow_uncalibrated_palm_normal: bool = False,
     ) -> Pipeline:
-        """Build a pipeline from a :class:`Settings` model.
-
-        Args:
-            settings: Loaded configuration.
-            emitter: Override emitter; if None, one is created from ``settings`` (a
-                ``NullEmitter`` unless ``input.enabled`` is True).
-            allow_uncalibrated_palm_normal: Allow missing palm-normal neutrals for safe
-                dry-run preview. The first visible sample temporarily seeds neutral.
-
-        Returns:
-            A ready-to-run :class:`Pipeline`.
-        """
+        """Build a pipeline from a :class:`Settings` model."""
         left_sm = GestureStateMachine("left", settings.gestures.left_hand)
         right_sm = GestureStateMachine("right", settings.gestures.right_hand)
-        guard = TrackingLossGuard(left_sm, right_sm)
+        
+        face_sm = None
+        if hasattr(settings, "face_tracking") and settings.face_tracking.enabled:
+            from minecraft_cv.gestures.face_gestures import FaceGestureStateMachine
+            face_sm = FaceGestureStateMachine(settings.gestures.face)
+
         j = settings.joystick
-        left_joy = ScreenJoystick(
-            j.deadzone,
-            j.left_sensitivity,
-            j.smoothing,
-            fixed_neutral=j.fixed_left_neutral,
+        left_joy = WristTiltJoystick(
+            deadzone_deg=j.deadzone,
+            sensitivity=j.left_sensitivity,
+            smoothing=j.smoothing,
         )
         right_joy = ScreenJoystick(
             j.deadzone,
@@ -205,12 +180,14 @@ class Pipeline:
         tr = settings.tracking
         return cls(
             emitter=emitter if emitter is not None else create_emitter(settings),
-            guard=guard,
+            bindings=dict(settings.bindings),
             left_joystick=left_joy,
             right_joystick=right_joy,
-            bindings=dict(settings.bindings),
-            left_joystick_signal=screen_mcp_centroid,
-            right_joystick_signal=screen_thumb_tip,
+            left_sm=left_sm,
+            right_sm=right_sm,
+            face_sm=face_sm,
+            left_joystick_signal=wrist_tilt_vector,
+            right_joystick_signal=screen_index_mcp,
             swap_handedness=settings.tracking.swap_handedness,
             scroll_repeat_rate_hz=settings.input.scroll_repeat_rate_hz,
             look_filter=look_filter,
@@ -221,17 +198,18 @@ class Pipeline:
         )
 
     # --- per-frame logic ----------------------------------------------------
-    def step(self, results: list[HandResult]) -> StepResult:
-        """Process one frame of tracker results and drive the emitter.
+    def step(self, hand_results: list[HandResult], face_result: Any | None = None) -> StepResult:
+        """Process one frame of tracking data.
 
         Args:
-            results: Detected hands for this frame (0-2). Split by handedness label.
+            hand_results: List of detected hands.
+            face_result: Optional FaceResult.
 
         Returns:
-            A :class:`StepResult` describing what happened (events + joystick outputs).
+            A snapshot of the system state for telemetry/HUD.
         """
         now = self._clock()
-        left_lm, right_lm = self._split(results)
+        left_lm, right_lm = self._split(hand_results)
 
         # Tracking-loss recovery (Task 5): decide per hand whether to emit, track, or flush.
         left_dec = self.left_recovery.update(left_lm is not None, now)
@@ -241,33 +219,31 @@ class Pipeline:
         if right_dec.flush:
             self._flush_right()
 
-        # Derive per-hand HUD status from recovery decisions.
-        left_status: HandStatus = _hand_status(left_lm, left_dec)
-        right_status: HandStatus = _hand_status(right_lm, right_dec)
-
         # Feed each hand's landmarks to its gesture machine only when that hand may emit
-        # (NORMAL phase). Absent or stabilizing -> pass None so the machine resets: no stuck
-        # keys, and no phantom presses fired during the re-entry settle window.
+        # (NORMAL phase).
         raw_events = self.guard.process(
             left_lm if left_dec.emit else None,
             right_lm if right_dec.emit else None,
         )
 
-        events = []
+        events = list(raw_events)
         relocalized_hands: set[str] = set()
-        for event in raw_events:
-            if event.gesture == "recenter":
-                if event.action == KEY_DOWN:
-                    if event.hand == "left" and left_lm is not None:
-                        self._relocalize_left(left_lm)
-                        relocalized_hands.add("left")
-                    elif event.hand == "right" and right_lm is not None:
-                        self._relocalize_right(right_lm)
-                        relocalized_hands.add("right")
-                continue
-            events.append(event)
+
+        # Update face gestures if provided
+        if self.face_sm and face_result is not None:
+            face_events = self.face_sm.update(face_result)
+            events.extend(face_events)
 
         for event in events:
+            if event.gesture == "recenter" and event.action == KEY_DOWN:
+                if event.hand == "left" and left_lm is not None:
+                    self._relocalize_left(left_lm)
+                    relocalized_hands.add("left")
+                elif event.hand == "right" and right_lm is not None:
+                    self._relocalize_right(right_lm)
+                    relocalized_hands.add("right")
+                continue
+            
             binding = self.bindings.get(event.gesture)
             if binding is None:
                 continue
@@ -290,7 +266,7 @@ class Pipeline:
         # Handle scroll repeat for held hotbar gestures.
         self._repeat_scroll(now)
 
-        # Collect debug signals for the HUD. These reads do not affect input emission.
+        # Collect debug signals for the HUD.
         left_held = self.guard.left_held
         right_held = self.guard.right_held
         left_sig = self.left_joystick_signal(left_lm) if left_lm is not None else None
@@ -304,11 +280,6 @@ class Pipeline:
             suppress_emit="recenter" in right_held,
         )
 
-        left_neutral = (
-            self.left_joystick.neutral.copy()
-            if self.left_joystick.neutral is not None
-            else None
-        )
         right_neutral = (
             self.right_joystick.neutral.copy()
             if self.right_joystick.neutral is not None
@@ -320,16 +291,18 @@ class Pipeline:
             left_output=left_out,
             right_output=right_out,
             wasd_held=frozenset(self._wasd_held),
+            relocalized_hands=frozenset(relocalized_hands),
             left_gestures=left_held,
             right_gestures=right_held,
-            relocalized_hands=frozenset(relocalized_hands),
+            face_gestures=frozenset(d.name for d in getattr(self.face_sm, "_detectors", []) if getattr(d, "_is_active", False)) if self.face_sm else frozenset(),
             left_signal=left_sig,
             right_signal=right_sig,
-            left_neutral=left_neutral,
+            left_neutral=self.left_joystick.neutral,
             right_neutral=right_neutral,
             deadzone=self.left_joystick.deadzone,
-            left_status=left_status,
-            right_status=right_status,
+            left_status=_hand_status(left_lm, left_dec),
+            right_status=_hand_status(right_lm, right_dec),
+            face_status=self.face_sm.status() if self.face_sm else "absent",
         )
 
     def _relocalize_left(self, landmarks: np.ndarray) -> None:
@@ -338,7 +311,7 @@ class Pipeline:
         self.left_joystick.recenter_at(self.left_joystick_signal(landmarks))
 
     def _relocalize_right(self, landmarks: np.ndarray) -> None:
-        """Reset the right thumb cursor point and emit no mouse movement."""
+        """Reset the right cursor point and emit no mouse movement."""
         self.emitter.mouse_stop()
         self._seed_right_cursor(self.right_joystick_signal(landmarks))
         if self.look_filter is not None:
@@ -413,7 +386,7 @@ class Pipeline:
         self._right_miss = 0
         if suppress_emit:
             # Peace sign is the "mouse lifted" clutch: keep moving the neutral to the
-            # thumb while held, but never send look/click movement from the right hand.
+            # cursor point while held, but never send look/click movement from the right hand.
             self._seed_right_cursor(self.right_joystick_signal(landmarks))
             if self.look_filter is not None:
                 self.look_filter.reset()
@@ -427,12 +400,12 @@ class Pipeline:
             self.emitter.mouse_stop()
             return self.right_joystick.zero()
         signal = self.right_joystick_signal(landmarks)
-        # Smooth the thumb *position* with the velocity-adaptive One-Euro filter before
+        # Smooth the cursor *position* with the velocity-adaptive One-Euro filter before
         # differencing, then drive the camera from the motion of the smoothed point. Raw
-        # frame-to-frame thumb deltas carry MediaPipe landmark jitter and frame-rate hitches
+        # frame-to-frame cursor deltas carry MediaPipe landmark jitter and frame-rate hitches
         # straight to the mouse, which reads as a sputtery "start-stop" look. One-Euro cuts
         # that jitter hard at rest yet barely lags fast looks. Because successive filtered
-        # positions telescope, the total emitted motion still equals the thumb's true
+        # positions telescope, the total emitted motion still equals the cursor's true
         # displacement (unity DC gain): the same look, merely spread smoothly across a few
         # frames so it glides to a stop instead of stuttering frame by frame.
         if self.look_filter is not None:
@@ -451,10 +424,10 @@ class Pipeline:
         return out
 
     def _seed_right_cursor(self, signal: np.ndarray) -> None:
-        """Set the right thumb's current cursor point without emitting movement."""
+        """Set the right hand's current cursor point without emitting movement."""
         cursor = np.asarray(signal, dtype=np.float64)[:2]
         self._right_cursor_prev = cursor.copy()
-        # Keep the existing HUD/relocalization surface pointed at the current thumb.
+        # Keep the existing HUD/relocalization surface pointed at the current cursor point.
         self.right_joystick.recenter_at(cursor)
 
     def _wasd_targets(self, output: np.ndarray) -> set[str]:

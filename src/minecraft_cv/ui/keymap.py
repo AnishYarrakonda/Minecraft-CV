@@ -106,14 +106,17 @@ def build_keymap(settings: Settings) -> list[KeyRow]:
         settings: Loaded configuration (gestures + bindings).
 
     Returns:
-        Left-hand rows followed by right-hand rows, each in the order configured.
+        Left-hand, right-hand, and face rows, each in the order configured.
     """
     bindings = settings.bindings
     rows: list[KeyRow] = []
     for hand, gestures in (
         ("left", settings.gestures.left_hand),
         ("right", settings.gestures.right_hand),
+        ("face", settings.gestures.face) if hasattr(settings.gestures, "face") else None,
     ):
+        if hand is None:
+            continue
         for gesture, spec in gestures.items():
             binding = bindings.get(gesture)
             if binding is None:

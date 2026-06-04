@@ -183,7 +183,7 @@ class MainWindow(QMainWindow):
     def _on_frame(self, packet: FramePacket) -> None:
         self._camera.set_packet(packet)
         step = packet.step
-        self._header.set_status(step.left_status, step.right_status)
+        self._header.set_status(step.left_status, step.right_status, step.face_status)
         self._keymap.update_state(step)
         self._movement.update_state(step)
 

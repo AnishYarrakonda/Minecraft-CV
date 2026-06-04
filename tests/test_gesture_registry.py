@@ -133,15 +133,14 @@ def test_extension_combo_requires_ring_and_pinky_curled(
     assert _names(released) == {("recenter", KEY_UP, "right")}
 
 
-def test_ring_pinch_is_q_and_pinky_pinch_is_sneak(
+def test_pinky_pinch_is_sneak(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = GestureStateMachine("left", Settings().gestures.left_hand)
-    both = make_landmarks({"ring": 0.20, "pinky": 0.20})
-    sm.update(both)
-    events = sm.update(both)
+    pinky = make_landmarks({"pinky": 0.20})
+    sm.update(pinky)
+    events = sm.update(pinky)
     assert _names(events) == {
-        ("throw_item", KEY_DOWN, "left"),
         ("sneak", KEY_DOWN, "left"),
     }
 

@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from typing import TYPE_CHECKING, Any
+
 from minecraft_cv.pipeline import Pipeline, StepResult
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
 
@@ -63,6 +65,7 @@ class FrameProcessor:
         source: FrameSource,
         tracker: HandTracker,
         settings: Settings,
+        face_tracker: Any | None = None,
     ) -> None:
         """Assemble a processor from already-constructed components.
 
@@ -75,6 +78,7 @@ class FrameProcessor:
         self.pipeline = pipeline
         self.source = source
         self.tracker = tracker
+        self.face_tracker = face_tracker
         self.settings = settings
 
         res_w, res_h = settings.tracking.input_resolution
@@ -126,7 +130,16 @@ class FrameProcessor:
                 fps=settings.camera.fps,
             )
         tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
-        return cls(pipeline, source, tracker, settings)
+        face_tracker = None
+        if hasattr(settings, "face_tracking") and settings.face_tracking.enabled:
+            from minecraft_cv.tracking.face_tracker import FaceTracker
+            face_tracker = FaceTracker(
+                model_path=settings.face_tracking.model_path,
+                device=settings.face_tracking.device,
+                min_detection_confidence=settings.face_tracking.min_detection_confidence,
+                min_tracking_confidence=settings.face_tracking.min_tracking_confidence,
+            )
+        return cls(pipeline, source, tracker, settings, face_tracker)
 
     def start(self) -> FrameProcessor:
         """Start the background capture buffer thread (idempotent)."""
@@ -200,7 +213,13 @@ class FrameProcessor:
         cv2.cvtColor(self._small_bgr, cv2.COLOR_BGR2RGB, dst=self._small_rgb)
 
         results = self.tracker.detect(self._small_rgb)
-        step = self.pipeline.step(results)
+        face_result = None
+        if self.face_tracker is not None:
+            # Face tracking also wants timestamp in ms
+            ts_ms = int(time.monotonic() * 1000)
+            face_result = self.face_tracker.detect(self._small_rgb, ts_ms)
+            
+        step = self.pipeline.step(results, face_result)
         self.processed += 1
         self._update_fps()
 
@@ -292,6 +311,8 @@ class FrameProcessor:
             buf.stop()  # type: ignore[attr-defined]
             self._buffer = None
         self.tracker.close()
+        if self.face_tracker is not None:
+            self.face_tracker.close()
 
     @property
     def elapsed(self) -> float:

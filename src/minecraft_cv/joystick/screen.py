@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 THUMB_TIP = 4
+INDEX_MCP = 5
 
 
 def screen_mcp_centroid(landmarks: np.ndarray) -> np.ndarray:
@@ -20,6 +21,15 @@ def screen_mcp_centroid(landmarks: np.ndarray) -> np.ndarray:
 def screen_thumb_tip(landmarks: np.ndarray) -> np.ndarray:
     """Return the right-hand cursor/look signal from the thumb tip."""
     return np.asarray(landmarks[THUMB_TIP, :2], dtype=np.float64)
+
+
+def screen_index_mcp(landmarks: np.ndarray) -> np.ndarray:
+    """Return the right-hand cursor/look signal from the index MCP (landmark 5).
+    
+    This is used instead of the thumb tip because it remains stationary when the
+    user pinches their fingers, eliminating cursor drift during clicks.
+    """
+    return np.asarray(landmarks[INDEX_MCP, :2], dtype=np.float64)
 
 
 class ScreenJoystick:

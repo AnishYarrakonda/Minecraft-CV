@@ -84,6 +84,18 @@ class TrackingSettings(BaseModel):
     on re-entry. ``0`` disables the stabilization window."""
 
 
+class FaceTrackerSettings(BaseModel):
+    """MediaPipe FaceLandmarker parameters."""
+
+    model_config = {"extra": "forbid"}
+
+    enabled: bool = True
+    model_path: str = "models/face_landmarker.task"
+    device: Literal["auto", "mps", "cuda", "cpu"] = "cpu"
+    min_detection_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    min_tracking_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 class GestureThresholds(BaseModel):
     """Schmitt-trigger thresholds for one discrete pinch gesture (right hand).
 
@@ -235,12 +247,6 @@ def _default_left_detector_gestures() -> dict[str, GestureDetectorSettings]:
         "jump": GestureDetectorSettings(
             detector="pinch", finger="index", t_engage=0.30, t_release=0.45
         ),
-        "inventory": GestureDetectorSettings(
-            detector="pinch", finger="middle", t_engage=0.30, t_release=0.45
-        ),
-        "throw_item": GestureDetectorSettings(
-            detector="pinch", finger="ring", t_engage=0.30, t_release=0.45
-        ),
         "sneak": GestureDetectorSettings(
             detector="pinch",
             finger="pinky",
@@ -255,7 +261,7 @@ def _default_left_detector_gestures() -> dict[str, GestureDetectorSettings]:
             mode="hold",
             extension_fingers=("index", "middle"),
             curl_fingers=("ring", "pinky"),
-            suppresses=("jump", "sneak", "inventory", "throw_item"),
+            suppresses=("jump", "sneak"),
         ),
     }
 
@@ -302,8 +308,52 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
     }
 
 
+class FaceGestureDetectorSettings(BaseModel):
+    """Face gesture detector settings."""
+
+    model_config = {"extra": "forbid"}
+
+    blendshape: str
+    t_engage: float = Field(default=0.5, gt=0.0, le=1.0)
+    t_release: float = Field(default=0.3, gt=0.0, le=1.0)
+    engage_frames: int = Field(default=3, ge=1)
+    release_frames: int = Field(default=2, ge=1)
+
+    @model_validator(mode="after")
+    def _check_hysteresis(self) -> FaceGestureDetectorSettings:
+        if not self.t_engage > self.t_release:
+            raise ValueError(
+                f"t_engage ({self.t_engage}) must be strictly greater than "
+                f"t_release ({self.t_release}) for face gestures."
+            )
+        return self
+
+
+def _default_face_gestures() -> dict[str, FaceGestureDetectorSettings]:
+    return {
+        "inventory": FaceGestureDetectorSettings(
+            blendshape="browInnerUp",
+            t_engage=0.5,
+            t_release=0.3,
+            engage_frames=3,
+        ),
+        "throw_item": FaceGestureDetectorSettings(
+            blendshape="jawOpen",  # jawOpen is the actual mediapipe blendshape name for mouth open
+            t_engage=0.6,
+            t_release=0.35,
+            engage_frames=2,
+        ),
+        "swap_offhand": FaceGestureDetectorSettings(
+            blendshape="eyeBlinkLeft",
+            t_engage=0.5,
+            t_release=0.3,
+            engage_frames=3,
+        ),
+    }
+
+
 class GestureSettings(BaseModel):
-    """Per-hand maps of gesture-name -> detector-backed hold gesture config."""
+    """Per-hand/face maps of gesture-name -> detector-backed hold gesture config."""
 
     model_config = {"extra": "forbid"}
 
@@ -312,6 +362,9 @@ class GestureSettings(BaseModel):
     )
     right_hand: dict[str, GestureDetectorSettings] = Field(
         default_factory=_default_right_detector_gestures
+    )
+    face: dict[str, FaceGestureDetectorSettings] = Field(
+        default_factory=_default_face_gestures
     )
 
 
@@ -374,6 +427,7 @@ def _default_bindings() -> dict[str, str]:
         "sneak": "shift",
         "inventory": "e",
         "throw_item": "q",
+        "swap_offhand": "f",
         # Right-hand discrete gestures.
         "attack": "mouse_left",
         "use": "mouse_right",
@@ -414,6 +468,7 @@ class Settings(BaseSettings):
 
     camera: CameraSettings = Field(default_factory=CameraSettings)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
+    face_tracking: FaceTrackerSettings = Field(default_factory=FaceTrackerSettings)
     gestures: GestureSettings = Field(default_factory=GestureSettings)
     joystick: JoystickSettings = Field(default_factory=JoystickSettings)
     input: InputSettings = Field(default_factory=InputSettings)

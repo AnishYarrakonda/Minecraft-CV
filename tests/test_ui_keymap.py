@@ -11,8 +11,6 @@ def test_build_keymap_covers_all_bound_gestures() -> None:
     # Left-hand actions with their pretty key labels and trigger fingers.
     assert rows[("left", "jump")].key == "Space"
     assert rows[("left", "jump")].finger == "Index"
-    assert rows[("left", "inventory")].key == "E"
-    assert rows[("left", "throw_item")].key == "Q"
     assert rows[("left", "sneak")].key == "Shift"
 
     # Right-hand combat with mouse / scroll specials.

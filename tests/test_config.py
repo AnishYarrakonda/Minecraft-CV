@@ -29,8 +29,6 @@ def test_defaults_construct_without_yaml() -> None:
     assert set(s.gestures.left_hand) == {
         "jump",
         "sneak",
-        "inventory",
-        "throw_item",
         "recenter",
     }
     assert set(s.gestures.right_hand) == {"attack", "use", "hotbar_next", "hotbar_prev", "recenter"}

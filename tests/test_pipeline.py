@@ -34,22 +34,26 @@ def test_right_joystick_still_carries_right_specific_sensitivity(
     assert pipe.left_joystick.smoothing == pytest.approx(0.1)
     assert pipe.right_joystick.smoothing == pytest.approx(0.7)
 
-def test_screen_joystick_anchors_first_frame(
+def test_wrist_tilt_joystick_anchors_first_frame(
     null_emitter: NullEmitter,
     make_screen_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     pipe = _pipeline(null_emitter)
 
-    # Stabilize
+    # Stabilize with a straight hand (wrist and MCP at x=0.5, y=0.5, 0.3)
+    base_lm = make_screen_landmarks()
+    base_lm[0, :2] = [0.5, 0.5]  # wrist
+    base_lm[9, :2] = [0.5, 0.3]  # middle MCP (pointing up)
     for _ in range(5):
-        lm = make_screen_landmarks(offset=(0.3, 0.3))
-        res1 = pipe.step([make_hand_result(lm, "Right")])
+        res1 = pipe.step([make_hand_result(base_lm, "Right")])
     assert res1.wasd_held == frozenset()
 
-    # Moving from that neutral triggers WASD.
-    lm_moved = make_screen_landmarks(offset=(0.3, 0.1))  # Moved up/forward (-y)
-    res2 = pipe.step([make_hand_result(lm_moved, "Right")])
+    # Tilt wrist forward (W) by moving the wrist down relative to the MCP
+    tilted_lm = base_lm.copy()
+    tilted_lm[0, :2] = [0.5, 0.6]  # wrist moved down -> hand tilted more up
+    tilted_lm[9, :2] = [0.5, 0.2]  # MCP moved up
+    res2 = pipe.step([make_hand_result(tilted_lm, "Right")])
     assert "w" in res2.wasd_held
 
 def test_left_pinch_jump(
@@ -77,18 +81,18 @@ def test_left_pinches_are_held_not_tapped(
     for _ in range(5):
         pipe.step([make_hand_result(make_screen_landmarks(), "Right")])
 
-    inventory = make_screen_landmarks(distances={"middle": 0.01})
-    pipe.step([make_hand_result(inventory, "Right")])
-    pipe.step([make_hand_result(inventory, "Right")])
-    assert ("key_down", "e") in null_emitter.log
-    assert ("key_tap", "e") not in null_emitter.log
-    assert "e" in null_emitter.held_keys
+    sneak = make_screen_landmarks(distances={"pinky": 0.01})
+    pipe.step([make_hand_result(sneak, "Right")])
+    pipe.step([make_hand_result(sneak, "Right")])
+    assert ("key_down", "shift") in null_emitter.log
+    assert ("key_tap", "shift") not in null_emitter.log
+    assert "shift" in null_emitter.held_keys
 
-    released = make_screen_landmarks(distances={"middle": 1.0})
+    released = make_screen_landmarks(distances={"pinky": 1.0})
     pipe.step([make_hand_result(released, "Right")])
     pipe.step([make_hand_result(released, "Right")])
-    assert ("key_up", "e") in null_emitter.log
-    assert "e" not in null_emitter.held_keys
+    assert ("key_up", "shift") in null_emitter.log
+    assert "shift" not in null_emitter.held_keys
 
 def test_tracking_loss_releases_held_keys(
     null_emitter: NullEmitter,
@@ -97,10 +101,17 @@ def test_tracking_loss_releases_held_keys(
 ) -> None:
     pipe = _pipeline(null_emitter)
     # Stabilize
+    base_lm = make_screen_landmarks()
+    base_lm[0, :2] = [0.5, 0.5]
+    base_lm[9, :2] = [0.5, 0.3]
     for _ in range(5):
-        pipe.step([make_hand_result(make_screen_landmarks(), "Right")])
-    # Move forward
-    pipe.step([make_hand_result(make_screen_landmarks(offset=(0.0, -0.5)), "Right")])
+        pipe.step([make_hand_result(base_lm, "Right")])
+    
+    # Tilt forward
+    tilted_lm = base_lm.copy()
+    tilted_lm[0, :2] = [0.5, 0.6]
+    tilted_lm[9, :2] = [0.5, 0.2]
+    pipe.step([make_hand_result(tilted_lm, "Right")])
     assert "w" in null_emitter.held_keys
 
     # Tracking drop for 10 frames > grace period (3)
@@ -169,7 +180,7 @@ def test_right_peace_relocalizes_right_joystick_without_clicks(
     assert not any(event[1:] == ("mouse_right",) for event in null_emitter.log)
 
 
-def test_right_look_follows_thumb_tip_not_palm_centroid(
+def test_right_look_follows_index_mcp_not_palm_centroid(
     null_emitter: NullEmitter,
     make_screen_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
@@ -179,16 +190,16 @@ def test_right_look_follows_thumb_tip_not_palm_centroid(
     for _ in range(4):
         pipe.step([make_hand_result(right_base, "Left")])
 
-    moved_thumb = right_base.copy()
-    moved_thumb[4, :2] += np.array([0.14, 0.0], dtype=np.float32)
-    res = pipe.step([make_hand_result(moved_thumb, "Left")])
+    moved_cursor = right_base.copy()
+    moved_cursor[5, :2] += np.array([0.14, 0.0], dtype=np.float32)
+    res = pipe.step([make_hand_result(moved_cursor, "Left")])
 
-    assert np.allclose(res.right_signal, moved_thumb[4, :2])
+    assert np.allclose(res.right_signal, moved_cursor[5, :2])
     assert res.right_output[0] > 0.0
     assert any(event[0] == "mouse_move" for event in null_emitter.log)
 
 
-def test_right_thumb_has_no_deadzone(
+def test_right_index_mcp_has_no_deadzone(
     null_emitter: NullEmitter,
     make_screen_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
@@ -198,12 +209,33 @@ def test_right_thumb_has_no_deadzone(
     for _ in range(4):
         pipe.step([make_hand_result(right_base, "Left")])
 
-    moved_thumb = right_base.copy()
-    moved_thumb[4, :2] += np.array([0.005, 0.0], dtype=np.float32)
-    res = pipe.step([make_hand_result(moved_thumb, "Left")])
+    moved_cursor = right_base.copy()
+    moved_cursor[5, :2] += np.array([0.005, 0.0], dtype=np.float32)
+    res = pipe.step([make_hand_result(moved_cursor, "Left")])
 
     assert res.right_output[0] > 0.0
     assert any(event[0] == "mouse_move" for event in null_emitter.log)
+
+def test_right_cursor_stable_during_pinch(
+    null_emitter: NullEmitter,
+    make_screen_landmarks: Callable[..., np.ndarray],
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    pipe = _pipeline(null_emitter)
+    right_base = make_screen_landmarks(offset=(0.65, 0.25), thumb_ext=1.1)
+    for _ in range(4):
+        pipe.step([make_hand_result(right_base, "Left")])
+
+    # Simulate a pinch by moving the thumb tip (landmark 4) towards the index finger.
+    # The index MCP (landmark 5) remains stationary.
+    pinched = right_base.copy()
+    pinched[4, :2] += np.array([0.15, -0.05], dtype=np.float32)
+    res = pipe.step([make_hand_result(pinched, "Left")])
+
+    # Because index MCP didn't move, the output should be zero.
+    assert res.right_output[0] == 0.0
+    assert res.right_output[1] == 0.0
+    assert not any(event[0] == "mouse_move" for event in null_emitter.log)
 
 
 def test_right_peace_clutches_mouse_and_recenters_thumb_while_held(
@@ -296,7 +328,7 @@ def test_right_look_one_euro_smooths_spike_and_glides_past_frame(
         pipe.step([make_hand_result(right_base, "Left")])
 
     jump = right_base.copy()
-    jump[4, :2] += np.array([0.20, 0.0], dtype=np.float32)
+    jump[5, :2] += np.array([0.20, 0.0], dtype=np.float32)
     raw_dx = 0.20 * sens  # what an unfiltered single-frame delta would emit
 
     spike = pipe.step([make_hand_result(jump, "Left")])

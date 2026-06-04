@@ -74,8 +74,10 @@ class HeaderBar(QWidget):
         lay.addWidget(self._pill)
         self._chip_l = HealthChip("L")
         self._chip_r = HealthChip("R")
+        self._chip_f = HealthChip("F")
         lay.addWidget(self._chip_l)
         lay.addWidget(self._chip_r)
+        lay.addWidget(self._chip_f)
 
         lay.addStretch(1)
 
@@ -115,10 +117,11 @@ class HeaderBar(QWidget):
         self._pill.setLive(live)
         self._sync_buttons()
 
-    def set_status(self, left: str, right: str) -> None:
-        """Update both per-hand tracking-health chips."""
+    def set_status(self, left: str, right: str, face: str = "absent") -> None:
+        """Update tracking-health chips."""
         self._chip_l.setStatus(left)
         self._chip_r.setStatus(right)
+        self._chip_f.setStatus(face)
 
     def _sync_buttons(self) -> None:
         self._start_btn.setText("Stop" if self._running else "Start")
@@ -173,19 +176,26 @@ class KeymapPanel(QWidget):
         cards = {
             "left": Card("LEFT HAND  ·  ACTIONS"),
             "right": Card("RIGHT HAND  ·  COMBAT"),
+            "face": Card("FACE GESTURES"),
         }
-        accents = {"left": theme.MOVE, "right": theme.LOOK}
+        accents = {"left": theme.MOVE, "right": theme.LOOK, "face": theme.ACCENT}
         for row in build_keymap(settings):
             widget = _KeymapRow(row.name, row.finger, row.key, accents[row.hand])
             self._rows[(row.hand, row.gesture)] = widget
             cards[row.hand].add(widget)
         lay.addWidget(cards["left"])
         lay.addWidget(cards["right"])
+        lay.addWidget(cards["face"])
 
     def update_state(self, step: StepResult) -> None:
         """Light each row whose gesture is currently held."""
         for (hand, gesture), widget in self._rows.items():
-            held = step.left_gestures if hand == "left" else step.right_gestures
+            if hand == "left":
+                held = step.left_gestures
+            elif hand == "right":
+                held = step.right_gestures
+            else:
+                held = step.face_gestures
             widget.set_active(gesture in held)
 
 
