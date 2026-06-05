@@ -29,8 +29,7 @@ def gestures() -> dict[str, ExtensionThresholds]:
 
 
 def test_thumb_out_fires_jump(
-    gestures: dict[str, ExtensionThresholds],
-    make_extended_landmarks: Callable[..., np.ndarray]
+    gestures: dict[str, ExtensionThresholds], make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
 
@@ -61,8 +60,7 @@ def test_thumb_out_fires_jump(
 
 
 def test_index_only_fires_sneak(
-    gestures: dict[str, ExtensionThresholds],
-    make_extended_landmarks: Callable[..., np.ndarray]
+    gestures: dict[str, ExtensionThresholds], make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
 
@@ -76,8 +74,7 @@ def test_index_only_fires_sneak(
 
 
 def test_middle_only_fires_sprint(
-    gestures: dict[str, ExtensionThresholds],
-    make_extended_landmarks: Callable[..., np.ndarray]
+    gestures: dict[str, ExtensionThresholds], make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
 
@@ -90,8 +87,7 @@ def test_middle_only_fires_sprint(
 
 
 def test_peace_sign_fires_inventory(
-    gestures: dict[str, ExtensionThresholds],
-    make_extended_landmarks: Callable[..., np.ndarray]
+    gestures: dict[str, ExtensionThresholds], make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
 
@@ -104,18 +100,12 @@ def test_peace_sign_fires_inventory(
 
 
 def test_exclusion_prevents_false_positive(
-    gestures: dict[str, ExtensionThresholds],
-    make_extended_landmarks: Callable[..., np.ndarray]
+    gestures: dict[str, ExtensionThresholds], make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
 
     # Extend all fingers
-    lm = make_extended_landmarks({
-        "index": 1.3,
-        "middle": 1.3,
-        "ring": 1.3,
-        "pinky": 1.3
-    })
+    lm = make_extended_landmarks({"index": 1.3, "middle": 1.3, "ring": 1.3, "pinky": 1.3})
     events = sm.update(lm)
     # The thumb is curled, so thumb_out shouldn't fire.
     # Because all fingers are extended, ALL 'only' gestures and 'index_middle' are excluded.
@@ -129,8 +119,7 @@ def test_pulse_gesture_is_marked(gestures: dict[str, ExtensionThresholds]) -> No
 
 
 def test_reset_releases_held(
-    gestures: dict[str, ExtensionThresholds],
-    make_extended_landmarks: Callable[..., np.ndarray]
+    gestures: dict[str, ExtensionThresholds], make_extended_landmarks: Callable[..., np.ndarray]
 ) -> None:
     sm = ExtensionStateMachine("left", gestures)
 

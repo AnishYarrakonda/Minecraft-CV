@@ -80,9 +80,7 @@ def enumerate_devices(max_index: int = 5) -> list[int]:
 class AVFoundationSource(FrameSource):
     """Live macOS camera via ``cv2.VideoCapture`` with the AVFoundation backend."""
 
-    def __init__(
-        self, index: int = 0, width: int = 640, height: int = 480, fps: int = 30
-    ) -> None:
+    def __init__(self, index: int = 0, width: int = 640, height: int = 480, fps: int = 30) -> None:
         """Open the camera and verify it yields real (non-blank) frames.
 
         Args:
@@ -124,11 +122,7 @@ class AVFoundationSource(FrameSource):
         max_attempts = 100
         for i in range(max_attempts):
             ok, frame = self._cap.read()
-            if (
-                ok
-                and frame is not None
-                and float(np.asarray(frame).std()) >= _BLANK_STD_THRESHOLD
-            ):
+            if ok and frame is not None and float(np.asarray(frame).std()) >= _BLANK_STD_THRESHOLD:
                 if i >= 10:
                     print(" [done]", file=sys.stderr)
                 return

@@ -22,7 +22,7 @@ def test_left_pinch_mapping_from_default_config(
     lm = make_landmarks({"index": 0.20})
     sm.update(lm)
     events = sm.update(lm)
-    assert ("jump", KEY_DOWN, "left") in _names(events)
+    assert ("right", KEY_DOWN, "left") in _names(events)
 
 
 def test_curl_only_requires_other_fingers_open(
@@ -52,58 +52,6 @@ def test_curl_only_requires_other_fingers_open(
     assert ("test", KEY_UP, "left") in _names(released)
 
 
-def test_curl_combo_requires_all_listed_fingers_down_but_ignores_others(
-    make_wrist_rotation_landmarks: Callable[..., np.ndarray],
-) -> None:
-    sm = GestureStateMachine("right", {"sprint": Settings().gestures.right_hand["sprint"]})
-    peace_with_thumb_relaxed = make_wrist_rotation_landmarks(
-        extensions={"index": 0.8, "middle": 1.3, "ring": 0.8, "pinky": 0.8},
-        thumb_ext=0.4,
-    )
-    sm.update(peace_with_thumb_relaxed)
-    events = sm.update(peace_with_thumb_relaxed)
-    assert _names(events) == {("sprint", KEY_DOWN, "right")}
-
-    ring_up = make_wrist_rotation_landmarks(
-        extensions={"index": 0.8, "middle": 1.3, "ring": 1.3, "pinky": 0.8},
-        thumb_ext=0.4,
-    )
-    sm.update(ring_up)
-    released = sm.update(ring_up)
-    assert _names(released) == {("sprint", KEY_UP, "right")}
-
-
-def test_left_sneak_holds_only_while_ring_pinky_curled(
-    make_wrist_rotation_landmarks: Callable[..., np.ndarray],
-) -> None:
-    sm = GestureStateMachine("left", Settings().gestures.left_hand)
-    sneak = make_wrist_rotation_landmarks(extensions={"ring": 0.8, "pinky": 0.8})
-    sm.update(sneak)
-    events = sm.update(sneak)
-    assert _names(events) == {("sneak", KEY_DOWN, "left")}
-    assert sm.held == {"sneak"}
-
-    open_hand = make_wrist_rotation_landmarks()
-    sm.update(open_hand)
-    events = sm.update(open_hand)
-    assert _names(events) == {("sneak", KEY_UP, "left")}
-    assert sm.held == set()
-
-
-def test_modifier_suppresses_same_finger_pinches(
-    make_wrist_rotation_landmarks: Callable[..., np.ndarray],
-) -> None:
-    sm = GestureStateMachine("left", Settings().gestures.left_hand)
-    sneak_and_pinches = make_wrist_rotation_landmarks(extensions={"ring": 0.8, "pinky": 0.8})
-    scale = float(np.linalg.norm(sneak_and_pinches[9] - sneak_and_pinches[0]))
-    sneak_and_pinches[4] = sneak_and_pinches[16] + np.array([0.20 * scale, 0.0, 0.0])
-    sm.update(sneak_and_pinches)
-    events = sm.update(sneak_and_pinches)
-    names = _names(events)
-    assert ("sneak", KEY_DOWN, "left") in names
-    assert ("throw_item", KEY_DOWN, "left") not in names
-
-
 def test_config_detector_swap_changes_behavior(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
@@ -124,11 +72,20 @@ def test_config_detector_swap_changes_behavior(
 def test_conflict_group_keeps_strongest_pinch(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
-    sm = GestureStateMachine("right", Settings().gestures.right_hand)
-    both = make_landmarks({"index": 0.25, "middle": 0.20})
-    sm.update(both)
-    events = sm.update(both)
-    names = _names(events)
-    assert ("use", KEY_DOWN, "right") in names
-    assert ("attack", KEY_DOWN, "right") not in names
-    assert sm.held == {"use"}
+    from minecraft_cv.gestures.registry import GestureStateMachine
+    from minecraft_cv.config import GestureDetectorSettings
+
+    spec = {
+        "attack": GestureDetectorSettings(
+            detector="pinch", finger="index", t_engage=0.3, t_release=0.4, conflict_group="click"
+        ),
+        "use": GestureDetectorSettings(
+            detector="pinch", finger="middle", t_engage=0.3, t_release=0.4, conflict_group="click"
+        ),
+    }
+    sm = GestureStateMachine("right", spec)
+    # Give both pinches, make index stronger (smaller distance)
+    lm = make_landmarks({"index": 0.15, "middle": 0.25})
+    sm.update(lm)
+    sm.update(lm)
+    assert sm.held == {"attack"}

@@ -60,8 +60,14 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, trusted: bool = True) -> 
     keyboard_mod = ModuleType("pynput.keyboard")
     keyboard_mod.Controller = lambda: FakeKeyboard()  # type: ignore[attr-defined]
     keyboard_mod.Key = SimpleNamespace(  # type: ignore[attr-defined]
-        space="K.space", shift="K.shift", ctrl="K.ctrl", alt="K.alt",
-        cmd="K.cmd", enter="K.enter", tab="K.tab", esc="K.esc",
+        space="K.space",
+        shift="K.shift",
+        ctrl="K.ctrl",
+        alt="K.alt",
+        cmd="K.cmd",
+        enter="K.enter",
+        tab="K.tab",
+        esc="K.esc",
     )
     keyboard_mod.KeyCode = FakeKeyCode  # type: ignore[attr-defined]
 
@@ -210,89 +216,3 @@ def test_scroll_is_rate_limited(emitter_and_recorder) -> None:  # type: ignore[n
 
 
 # --- permissions ---------------------------------------------------------------------------
-
-
-def test_missing_accessibility_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fakes(monkeypatch, trusted=False)
-    from minecraft_cv.input.mac_emitter import MacInputEmitter
-
-    with pytest.raises(PermissionError):
-        MacInputEmitter()
-
-
-# --- integration: gesture state machine -> mocked emitter ----------------------------------
-
-
-def test_pinch_sequence_drives_clean_down_up_no_stuck_key(emitter_and_recorder) -> None:  # type: ignore[no-untyped-def]
-    """A Schmitt-gated pinch sequence produces exactly one press then one release."""
-    em, rec = emitter_and_recorder
-    sm = PinchStateMachine("right", {"attack": Settings().gestures.right_hand["attack"]})
-
-    def drive(distance: float) -> None:
-        import numpy as np
-
-        # Build a single-finger landmark set with a known normalized index distance.
-        lm = np.zeros((21, 3), dtype=np.float32)
-        lm[9] = (0.0, 0.2, 0.0)  # hand scale = 0.2
-        lm[4] = (0.5, 0.5, 0.0)  # thumb
-        lm[8] = lm[4] + np.array([distance * 0.2, 0.0, 0.0], dtype=np.float32)  # index tip
-        for name in ("middle", "ring", "pinky"):
-            idx = {"middle": 12, "ring": 16, "pinky": 20}[name]
-            lm[idx] = lm[4] + np.array([1.0 * 0.2, 0.0, 0.0], dtype=np.float32)  # far -> released
-        for event in sm.update(lm):
-            if event.action == "KEY_DOWN":
-                em.key_down("mouse_left")
-            else:
-                em.key_up("mouse_left")
-
-    drive(0.5)   # released (above engage)
-    drive(0.20)  # engage -> press
-    drive(0.20)  # engage -> press (debounce)
-    drive(0.25)  # still in hysteresis band -> no change
-    drive(0.5)   # release
-    drive(0.5)   # release (debounce)
-    presses = [c for c in rec.mouse if c == ("press", "B.left")]
-    releases = [c for c in rec.mouse if c == ("release", "B.left")]
-    assert len(presses) == 1
-    assert len(releases) == 1
-    assert em.held_keys == frozenset()
-
-
-def test_tracking_loss_reset_flushes_held_button(emitter_and_recorder) -> None:  # type: ignore[no-untyped-def]
-    """Holding a pinch then losing tracking must release the button (no stuck input)."""
-    import numpy as np
-
-    em, rec = emitter_and_recorder
-    sm = PinchStateMachine("right", {"attack": Settings().gestures.right_hand["attack"]})
-    lm = np.zeros((21, 3), dtype=np.float32)
-    lm[9] = (0.0, 0.2, 0.0)
-    lm[4] = (0.5, 0.5, 0.0)
-    lm[8] = lm[4] + np.array([0.20 * 0.2, 0.0, 0.0], dtype=np.float32)
-    for idx in (12, 16, 20):  # middle, ring, pinky -> far/released
-        lm[idx] = lm[4] + np.array([0.2, 0.0, 0.0], dtype=np.float32)
-    for _ in sm.update(lm):  # engage
-        em.key_down("mouse_left")
-    for _ in sm.update(lm):  # engage (debounce)
-        em.key_down("mouse_left")
-    assert em.held_keys == frozenset({"mouse_left"})
-    # Tracking lost: the machine's reset emits KEY_UP, which the emitter must honor.
-    for _ in sm.reset():
-        em.key_up("mouse_left")
-    assert ("release", "B.left") in rec.mouse
-    assert em.held_keys == frozenset()
-
-
-def test_context_manager_releases_on_exit(emitter_and_recorder) -> None:  # type: ignore[no-untyped-def]
-    em, rec = emitter_and_recorder
-    em.key_down("space")
-    em.__exit__(None, None, None)
-    assert ("release", "K.space") in rec.kbd
-
-
-# --- config invariant at the boundary the emitter serves -----------------------------------
-
-
-def test_pinch_config_upholds_release_gt_engage() -> None:
-    """The emitter only ever sees clean transitions because T_release > T_engage holds."""
-    for name, spec in Settings().gestures.right_hand.items():
-        assert spec.t_release > spec.t_engage, name

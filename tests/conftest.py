@@ -63,6 +63,7 @@ _PIP_INDICES = {"index": 6, "middle": 10, "ring": 14, "pinky": 18}
 _TIP_INDICES_EXT = {"index": 8, "middle": 12, "ring": 16, "pinky": 20}
 _MCP_INDICES = {"index": 5, "middle": 9, "ring": 13, "pinky": 17}
 
+
 def _build_extended_landmarks(
     extensions: dict[str, float] | None = None,
     thumb_ext: float = 0.5,

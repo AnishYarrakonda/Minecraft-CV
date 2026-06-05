@@ -38,6 +38,7 @@ def _ensure_model() -> Path:
     print(f"[mediapipe] Downloading hand_landmarker model to {_MODEL_CACHE} …")
     try:
         import certifi
+
         ctx = ssl.create_default_context(cafile=certifi.where())
     except ImportError:
         ctx = ssl.create_default_context()
@@ -107,9 +108,7 @@ class MediaPipeHandTracker(HandTracker):
         Returns:
             Zero to ``max_num_hands`` :class:`HandResult` objects.
         """
-        mp_image = self._mp_image_cls(
-            image_format=self._mp_image_format, data=rgb_frame
-        )
+        mp_image = self._mp_image_cls(image_format=self._mp_image_format, data=rgb_frame)
         result = self._detector.detect_for_video(mp_image, self._timestamp_ms())
         if not result.hand_landmarks:
             return []

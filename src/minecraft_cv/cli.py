@@ -214,22 +214,38 @@ def main_calibrate(argv: list[str] | None = None) -> int:
     )
     _add_config_arg(p)
     p.add_argument("--clip", help="calibrate from a clip instead of the live camera")
-    p.add_argument("--hand", choices=["Left", "Right"], default="Right",
-                   help="MediaPipe handedness label to sample (default: Right)")
-    p.add_argument("--anchor", choices=["wrist", "middle_mcp"], default=None,
-                   help="anchor landmark (default: from config)")
-    p.add_argument("--mode", choices=["palm-tilt", "palm-normal", "anchor"], default=None,
-                   help="calibration mode (default: from joystick.mode)")
-    p.add_argument("--frames-per-step", type=int, default=60,
-                   help="samples to collect per pose (default: 60)")
+    p.add_argument(
+        "--hand",
+        choices=["Left", "Right"],
+        default="Right",
+        help="MediaPipe handedness label to sample (default: Right)",
+    )
+    p.add_argument(
+        "--anchor",
+        choices=["wrist", "middle_mcp"],
+        default=None,
+        help="anchor landmark (default: from config)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["palm-tilt", "palm-normal", "anchor"],
+        default=None,
+        help="calibration mode (default: from joystick.mode)",
+    )
+    p.add_argument(
+        "--frames-per-step", type=int, default=60, help="samples to collect per pose (default: 60)"
+    )
     p.add_argument("--apply", action="store_true", help="write the result back to config.yaml")
     p.add_argument(
         "--quick-neutral",
         action="store_true",
         help="palm-normal mode: capture only the resting pose and keep current gains",
     )
-    p.add_argument("--pinch", action="store_true",
-                   help="legacy mode: print live thumb-to-fingertip distances instead")
+    p.add_argument(
+        "--pinch",
+        action="store_true",
+        help="legacy mode: print live thumb-to-fingertip distances instead",
+    )
     args = p.parse_args(argv)
     settings = _load_settings(args.config)
 
@@ -278,8 +294,10 @@ def _calibrate_palm_normals(
             ClipSource(args.clip)
             if args.clip
             else AVFoundationSource(
-                settings.camera.index, settings.camera.width,
-                settings.camera.height, settings.camera.fps,
+                settings.camera.index,
+                settings.camera.width,
+                settings.camera.height,
+                settings.camera.fps,
             )
         )
         tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
@@ -295,9 +313,7 @@ def _calibrate_palm_normals(
     )
     steps: list[tuple[str, str]] = [("neutral", "Hold BOTH hands in your resting pose.")]
     if not args.quick_neutral:
-        steps.extend(
-            (pose, reach_hint.format(dir=pose.upper())) for pose in PALM_NORMAL_POSES
-        )
+        steps.extend((pose, reach_hint.format(dir=pose.upper())) for pose in PALM_NORMAL_POSES)
     collected: dict[str, dict[str, list[np.ndarray]]] = {
         "left": {},
         "right": {},
@@ -357,10 +373,7 @@ def _calibrate_palm_normals(
     print(f"  right sensitivity   = {overrides['right_sensitivity']}")
 
     if not args.apply:
-        print(
-            "\n[mcv-calibrate] preview only. Re-run with --apply to write to "
-            f"{args.config}."
-        )
+        print(f"\n[mcv-calibrate] preview only. Re-run with --apply to write to {args.config}.")
         return 0
 
     config_path = args.config
@@ -379,8 +392,7 @@ def _calibrate_palm_normals(
     try:
         Settings(**merged)
     except Exception as exc:  # noqa: BLE001 - surface any validation failure to the user
-        print(f"[mcv-calibrate] error: computed config failed validation: {exc}",
-              file=sys.stderr)
+        print(f"[mcv-calibrate] error: computed config failed validation: {exc}", file=sys.stderr)
         return 1
     save_config_data(config_path, merged)
     print(f"[mcv-calibrate] wrote {label} calibration to {config_path}.")
@@ -402,9 +414,7 @@ def _save_quick_palm_normal_calibration(
 
     block_key = "tilt" if tilt else "palm_normal"
     mode_name = "palm_tilt" if tilt else "palm_normal"
-    left_samples = np.asarray(collected["left"].get("neutral", []), dtype=np.float64).reshape(
-        -1, 2
-    )
+    left_samples = np.asarray(collected["left"].get("neutral", []), dtype=np.float64).reshape(-1, 2)
     right_samples = np.asarray(collected["right"].get("neutral", []), dtype=np.float64).reshape(
         -1, 2
     )
@@ -457,8 +467,7 @@ def _save_quick_palm_normal_calibration(
     try:
         Settings(**merged)
     except Exception as exc:  # noqa: BLE001 - surface any validation failure to the user
-        print(f"[mcv-calibrate] error: computed config failed validation: {exc}",
-              file=sys.stderr)
+        print(f"[mcv-calibrate] error: computed config failed validation: {exc}", file=sys.stderr)
         return 1
     save_config_data(config_path, merged)
     print(f"[mcv-calibrate] wrote quick {mode_name} calibration to {config_path}.")
@@ -486,8 +495,10 @@ def _calibrate_joysticks(args: argparse.Namespace, settings: Settings) -> int:
             ClipSource(args.clip)
             if args.clip
             else AVFoundationSource(
-                settings.camera.index, settings.camera.width,
-                settings.camera.height, settings.camera.fps,
+                settings.camera.index,
+                settings.camera.width,
+                settings.camera.height,
+                settings.camera.fps,
             )
         )
         tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
@@ -510,8 +521,13 @@ def _calibrate_joysticks(args: argparse.Namespace, settings: Settings) -> int:
                     print(f"  capturing in {c}…", end="\r", flush=True)
                     time.sleep(1.0)
             samples = _collect_anchor_samples(
-                source, tracker, args.hand, anchor, args.frames_per_step,
-                settings.camera.mirror, cv2,
+                source,
+                tracker,
+                args.hand,
+                anchor,
+                args.frames_per_step,
+                settings.camera.mirror,
+                cv2,
             )
             collected[name] = samples
             print(f"  captured {len(samples)} samples for '{name}'.        ")
@@ -540,21 +556,21 @@ def _calibrate_joysticks(args: argparse.Namespace, settings: Settings) -> int:
     print(f"  -> sensitivity     = {result.joystick_overrides()['sensitivity']}")
 
     if not args.apply:
-        print("\n[mcv-calibrate] preview only. Re-run with --apply to write to "
-              f"{args.config}.")
+        print(f"\n[mcv-calibrate] preview only. Re-run with --apply to write to {args.config}.")
         return 0
 
     config_path = args.config
     if not Path(config_path).is_file():
-        print(f"[mcv-calibrate] error: cannot apply; config '{config_path}' does not exist.",
-              file=sys.stderr)
+        print(
+            f"[mcv-calibrate] error: cannot apply; config '{config_path}' does not exist.",
+            file=sys.stderr,
+        )
         return 1
     merged = merge_calibration(load_config_data(config_path), result)
     try:
         Settings(**merged)  # validate before writing — never persist an invalid config.
     except Exception as exc:  # noqa: BLE001 - surface any validation failure to the user
-        print(f"[mcv-calibrate] error: computed config failed validation: {exc}",
-              file=sys.stderr)
+        print(f"[mcv-calibrate] error: computed config failed validation: {exc}", file=sys.stderr)
         return 1
     save_config_data(config_path, merged)
     print(f"[mcv-calibrate] wrote joystick calibration to {config_path}.")
@@ -591,7 +607,11 @@ def _collect_anchor_samples(
         cv2.putText(
             frame,
             f"samples: {len(out)}/{n_frames}",
-            (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1,
+            (8, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            1,
         )
         cv2.imshow("minecraft_cv calibrate", frame)
         cv2.waitKey(1)
@@ -641,7 +661,11 @@ def _collect_palm_normal_samples(
         cv2.putText(
             frame,
             f"L:{len(out['left'])}/{n_frames}  R:{len(out['right'])}/{n_frames}",
-            (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1,
+            (8, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            1,
         )
         cv2.imshow("minecraft_cv calibrate", frame)
         cv2.waitKey(1)
@@ -660,13 +684,17 @@ def _calibrate_pinch(args: argparse.Namespace, settings: Settings) -> int:
         ClipSource(args.clip)
         if args.clip
         else AVFoundationSource(
-            settings.camera.index, settings.camera.width,
-            settings.camera.height, settings.camera.fps,
+            settings.camera.index,
+            settings.camera.width,
+            settings.camera.height,
+            settings.camera.fps,
         )
     )
     tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
-    print("[mcv-calibrate] move your fingers; Ctrl-C to stop. Pick T_engage below the "
-          "pinched distance and T_release above the open distance.")
+    print(
+        "[mcv-calibrate] move your fingers; Ctrl-C to stop. Pick T_engage below the "
+        "pinched distance and T_release above the open distance."
+    )
     mirror = settings.camera.mirror
     try:
         while True:
@@ -736,8 +764,10 @@ def main_analyze(argv: list[str] | None = None) -> int:
     track_ms: list[float] = []
     gesture_ms: list[float] = []
     n_frames = n_transitions = 0
-    print(f"=== mcv-analyze gesture={args.gesture} finger={args.finger} "
-          f"T_engage={args.engage} T_release={args.release} ===")
+    print(
+        f"=== mcv-analyze gesture={args.gesture} finger={args.finger} "
+        f"T_engage={args.engage} T_release={args.release} ==="
+    )
     try:
         while True:
             frame = source.read()
@@ -768,8 +798,10 @@ def main_analyze(argv: list[str] | None = None) -> int:
     print(f"frames={n_frames}  transitions={n_transitions}")
     if args.timing and track_ms:
         for name, xs in (("track", track_ms), ("gesture", gesture_ms)):
-            print(f"  {name:>8}: p50={_pct(xs, 50):6.2f}  p95={_pct(xs, 95):6.2f}  "
-                  f"p99={_pct(xs, 99):6.2f}  mean={statistics.fmean(xs):6.2f} ms")
+            print(
+                f"  {name:>8}: p50={_pct(xs, 50):6.2f}  p95={_pct(xs, 95):6.2f}  "
+                f"p99={_pct(xs, 99):6.2f}  mean={statistics.fmean(xs):6.2f} ms"
+            )
     return 0
 
 
@@ -782,10 +814,20 @@ def main_bench(argv: list[str] | None = None) -> int:
     p.add_argument("--frames", type=int, default=500)
     p.add_argument("--warmup", type=int, default=20)
     p.add_argument("--clip", help="benchmark on a clip; otherwise synthetic noise frames")
-    p.add_argument("--target-fps", type=float, default=60.0,
-                   help="FPS the mean frame time is checked against (default: 60)")
-    p.add_argument("--json", dest="json_path", nargs="?", const="-", default=None,
-                   help="write the full JSON report to PATH (or stdout if given with no value)")
+    p.add_argument(
+        "--target-fps",
+        type=float,
+        default=60.0,
+        help="FPS the mean frame time is checked against (default: 60)",
+    )
+    p.add_argument(
+        "--json",
+        dest="json_path",
+        nargs="?",
+        const="-",
+        default=None,
+        help="write the full JSON report to PATH (or stdout if given with no value)",
+    )
     args = p.parse_args(argv)
 
     from minecraft_cv.tracking.tracker import HandTracker
@@ -825,11 +867,15 @@ def main_bench(argv: list[str] | None = None) -> int:
         "meets_target": summary["fps_mean"] >= args.target_fps,
         "detect_ms": summary,
     }
-    print(f"=== mcv-bench backend={args.backend} device={args.device} "
-          f"frames={len(times)} (warmup={args.warmup}) ===")
-    print(f"  detect: p50={summary['p50']:6.2f}  p95={summary['p95']:6.2f}  "
-          f"p99={summary['p99']:6.2f}  mean={summary['mean']:6.2f} ms  "
-          f"jitter(std)={summary['jitter_std']:5.2f}  (~{summary['fps_mean']:5.1f} FPS)")
+    print(
+        f"=== mcv-bench backend={args.backend} device={args.device} "
+        f"frames={len(times)} (warmup={args.warmup}) ==="
+    )
+    print(
+        f"  detect: p50={summary['p50']:6.2f}  p95={summary['p95']:6.2f}  "
+        f"p99={summary['p99']:6.2f}  mean={summary['mean']:6.2f} ms  "
+        f"jitter(std)={summary['jitter_std']:5.2f}  (~{summary['fps_mean']:5.1f} FPS)"
+    )
     status = "PASS" if report["meets_target"] else "FAIL"
     print(f"  target {args.target_fps:.0f} FPS: {status}")
 

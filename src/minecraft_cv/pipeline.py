@@ -21,7 +21,9 @@ import numpy as np
 
 from minecraft_cv.gestures.inventory import InventoryModeToggle
 from minecraft_cv.gestures.pinch import KEY_DOWN
-from minecraft_cv.gestures.registry import GestureStateMachine
+from minecraft_cv.gestures.registry import GestureStateMachine, GestureEvent
+from minecraft_cv.gestures.pinch import KEY_DOWN, KEY_UP
+
 from minecraft_cv.gestures.safety import AnyGestureEvent, TrackingLossGuard
 from minecraft_cv.input.emitter import InputEmitter, create_emitter
 from minecraft_cv.joystick.deadzone import ANCHOR_INDEX, anchor_xy
@@ -32,6 +34,20 @@ from minecraft_cv.joystick.sprint_velocity import ENGAGE, RELEASE, SprintVelocit
 from minecraft_cv.joystick.wrist_rotation import WristRotationJoystick, palm_xz
 from minecraft_cv.recovery import HandRecovery, RecoveryDecision
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
+from minecraft_cv.tracking.mediapipe_face_backend import MediaPipeFaceTracker
+
+
+class FaceTrigger:
+    def __init__(self, t_engage, t_release):
+        self.t_engage = t_engage
+        self.t_release = t_release
+
+
+class HeadRollTrigger:
+    def __init__(self, t_engage, t_release):
+        self.t_engage = t_engage
+        self.t_release = t_release
+
 
 if TYPE_CHECKING:
     from minecraft_cv.capture.source import FrameSource
@@ -51,9 +67,9 @@ class StepResult:
     """Outcome of one :meth:`Pipeline.step` (for tests / overlay / introspection)."""
 
     events: Sequence[AnyGestureEvent] = field(default_factory=list)
-    left_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
+    face_events: Sequence[AnyGestureEvent] = field(default_factory=list)
+
     right_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
-    wasd_held: frozenset[str] = field(default_factory=frozenset)
     inventory_active: bool = False
 
 
@@ -64,7 +80,6 @@ class Pipeline:
         self,
         emitter: InputEmitter,
         guard: TrackingLossGuard,
-        left_joystick: JoystickLike,
         right_joystick: JoystickLike,
         bindings: dict[str, str],
         joystick_signal: Callable[[np.ndarray], np.ndarray] = palm_xz,
@@ -83,6 +98,7 @@ class Pipeline:
         right_recovery: HandRecovery | None = None,
         min_emit_confidence: float = 0.0,
         clock: Callable[[], float] = time.perf_counter,
+        face_settings=None,
     ) -> None:
         """Assemble a pipeline from already-constructed components.
 
@@ -123,7 +139,7 @@ class Pipeline:
         """
         self.emitter = emitter
         self.guard = guard
-        self.left_joystick = left_joystick
+
         self.right_joystick = right_joystick
         self.bindings = bindings
         self.joystick_signal = joystick_signal
@@ -142,12 +158,40 @@ class Pipeline:
         self.right_recovery = right_recovery if right_recovery is not None else HandRecovery()
         self.min_emit_confidence = float(min_emit_confidence)
         self._clock = clock
-        self._wasd_held: set[str] = set()
         self._left_miss = 0
         self._right_miss = 0
         self._sprint_active = False
         # Scroll repeat state: track last scroll time per direction for rate limiting.
         self._last_scroll_time: dict[str, float] = {}
+
+        # Face triggers
+        self.face_triggers = {
+            "inventory": FaceTrigger(
+                0.5, 0.4
+            ),  # Default placeholders, we will pass via Settings if we want
+            "throw_item": FaceTrigger(0.5, 0.4),
+            "switch_offhand": FaceTrigger(0.5, 0.4),
+        }
+        self.head_roll_trigger = HeadRollTrigger(15.0, 10.0)
+        self._head_roll_direction = 0  # 1 for up, -1 for down
+        self.face_scroll_rate_hz = 4.0
+        self.face_held: set[str] = set()
+        if face_settings is not None:
+            self.face_triggers = {
+                "inventory": FaceTrigger(
+                    face_settings.brow_inner_up_threshold,
+                    face_settings.brow_inner_up_threshold - 0.1,
+                ),
+                "throw_item": FaceTrigger(
+                    face_settings.jaw_open_threshold, face_settings.jaw_open_threshold - 0.1
+                ),
+                "switch_offhand": FaceTrigger(
+                    face_settings.nose_sneer_threshold, face_settings.nose_sneer_threshold - 0.1
+                ),
+            }
+            self.head_roll_trigger = HeadRollTrigger(
+                face_settings.head_roll_engage, face_settings.head_roll_release
+            )
 
     @classmethod
     def from_settings(
@@ -173,7 +217,6 @@ class Pipeline:
         guard = TrackingLossGuard(left_sm, right_sm)
         j = settings.joystick
         joystick_signal: Callable[[np.ndarray], np.ndarray]
-        left_joy: JoystickLike
         right_joy: JoystickLike
         if j.mode == "palm_tilt":
             t = j.tilt
@@ -184,9 +227,7 @@ class Pipeline:
                     "`mcv calibrate --apply` to write left/right neutral tilt vectors, or use "
                     "`mcv run --no-input --debug-overlay` for an uncalibrated preview."
                 )
-            left_joy = PalmNormalJoystick(
-                t.left_neutral, t.deadzone, t.left_sensitivity, j.max_output, j.smoothing
-            )
+
             right_joy = PalmNormalJoystick(
                 t.right_neutral, t.deadzone, t.right_sensitivity, j.max_output, j.smoothing
             )
@@ -200,17 +241,12 @@ class Pipeline:
                     "`mcv calibrate --apply` to write left/right neutral normals, or use "
                     "`mcv run --no-input --debug-overlay` for an uncalibrated preview."
                 )
-            left_joy = PalmNormalJoystick(
-                pn.left_neutral, pn.deadzone, pn.left_sensitivity, j.max_output, j.smoothing
-            )
+
             right_joy = PalmNormalJoystick(
                 pn.right_neutral, pn.deadzone, pn.right_sensitivity, j.max_output, j.smoothing
             )
             joystick_signal = palm_normal_xy
         else:
-            left_joy = WristRotationJoystick(
-                j.deadzone_radius, j.sensitivity, j.max_output, j.smoothing
-            )
             right_joy = WristRotationJoystick(
                 j.deadzone_radius, j.sensitivity, j.max_output, j.smoothing
             )
@@ -244,10 +280,10 @@ class Pipeline:
             else None
         )
         tr = settings.tracking
+
         return cls(
             emitter=emitter if emitter is not None else create_emitter(settings),
             guard=guard,
-            left_joystick=left_joy,
             right_joystick=right_joy,
             bindings=dict(settings.bindings),
             joystick_signal=joystick_signal,
@@ -263,12 +299,18 @@ class Pipeline:
             cursor_gain=inv.cursor_gain,
             sprint_trigger=sprint_trigger,
             left_recovery=HandRecovery(tr.dropout_flush_ms, tr.stabilization_ms),
+            face_settings=settings.face,
             right_recovery=HandRecovery(tr.dropout_flush_ms, tr.stabilization_ms),
             min_emit_confidence=tr.min_emit_confidence,
         )
 
     # --- per-frame logic ----------------------------------------------------
-    def step(self, results: list[HandResult]) -> StepResult:
+    def step(
+        self,
+        results: list[HandResult],
+        face_landmarks: np.ndarray | None = None,
+        face_blendshapes: dict[str, float] | None = None,
+    ) -> StepResult:
         """Process one frame of tracker results and drive the emitter.
 
         Args:
@@ -296,6 +338,65 @@ class Pipeline:
             inventory_active = toggle.active
             if toggle.toggled:
                 self._on_inventory_toggle()
+
+        face_events = []
+        if face_blendshapes is not None:
+            # Process face blendshapes
+            blendshape_mapping = {
+                "inventory": "browInnerUp",
+                "throw_item": "jawOpen",
+                "switch_offhand": "noseSneer",
+            }
+
+            for action, blendshape_name in blendshape_mapping.items():
+                val = face_blendshapes.get(blendshape_name, 0.0)
+                trigger = self.face_triggers[action]
+
+                # Manual Schmitt for higher-is-engaged
+                is_held = action in self.face_held
+                if not is_held and val >= trigger.t_engage:
+                    self.face_held.add(action)
+                    face_events.append(GestureEvent(action, KEY_DOWN, "face"))
+                    binding = self.bindings.get(action)
+                    if binding:
+                        self.emitter.key_tap(binding)  # These are pulse actions
+                elif is_held and val <= trigger.t_release:
+                    self.face_held.remove(action)
+                    # For pulse, no UP event needed usually, but we append for logs
+                    face_events.append(GestureEvent(action, KEY_UP, "face"))
+
+        # Head roll
+        if face_landmarks is not None:
+            left_eye = face_landmarks[33]
+            right_eye = face_landmarks[263]
+            dx = right_eye[0] - left_eye[0]
+            dy = right_eye[1] - left_eye[1]
+            roll = np.degrees(np.arctan2(dy, dx))
+
+            # Roll is 0 when level. Positive when tilted right (from user perspective, assuming unmirrored internally? We'll use absolute)
+            # We'll check absolute tilt
+            abs_roll = abs(roll)
+            trigger = self.head_roll_trigger
+
+            if self._head_roll_direction == 0:
+                if abs_roll >= trigger.t_engage:
+                    self._head_roll_direction = 1 if roll > 0 else -1
+            else:
+                if abs_roll <= trigger.t_release:
+                    self._head_roll_direction = 0
+                    self._last_scroll_time.pop("head_scroll", None)
+
+            if self._head_roll_direction != 0:
+                interval = 1.0 / self.face_scroll_rate_hz
+                last_time = self._last_scroll_time.get("head_scroll", 0)
+                if now - last_time >= interval:
+                    self._last_scroll_time["head_scroll"] = now
+                    # Roll positive -> tilt right -> scroll down
+                    # Roll negative -> tilt left -> scroll up
+                    if self._head_roll_direction > 0:
+                        self.emitter.scroll(-1)
+                    else:
+                        self.emitter.scroll(1)
 
         # Feed each hand's landmarks to its gesture machine only when that hand may emit
         # (NORMAL phase). Absent or stabilizing -> pass None so the machine resets: no stuck
@@ -342,24 +443,18 @@ class Pipeline:
 
         if inventory_active:
             # WASD paused; the right hand drives the OS cursor in absolute screen coords.
-            self._apply_wasd(set())
-            self._release_sprint()
+
             right_out = self._update_cursor(right_lm if right_dec.emit else None)
             return StepResult(
                 events=events,
-                left_output=self.left_joystick.zero(),
                 right_output=right_out,
-                wasd_held=frozenset(),
                 inventory_active=True,
             )
 
-        left_out = self._update_translation(left_lm, left_dec, now)
         right_out = self._update_look(right_lm, right_dec, now)
         return StepResult(
             events=events,
-            left_output=left_out,
             right_output=right_out,
-            wasd_held=frozenset(self._wasd_held),
             inventory_active=False,
         )
 
@@ -369,13 +464,13 @@ class Pipeline:
         Releases held WASD keys and any held left-hand gesture keys, recenters both joysticks,
         and resets the look filter so neither mode inherits stale state from the other.
         """
-        self._apply_wasd(set())
+
         self._release_sprint()
         for event in self.guard.reset_left():
             binding = self.bindings.get(event.gesture)
             if binding is not None and binding not in ("scroll_up", "scroll_down"):
                 self.emitter.key_up(binding)
-        self.left_joystick.reset_neutral()
+
         self.right_joystick.reset_neutral()
         if self.look_filter is not None:
             self.look_filter.reset()
@@ -386,7 +481,6 @@ class Pipeline:
         self._release_sprint()
         if self.sprint_trigger is not None:
             self.sprint_trigger.reset_neutral()
-        self.left_joystick.reset_neutral()
 
     def _flush_right(self) -> None:
         """Hard-flush the right hand: recenter the look joystick + drop look velocity."""
@@ -471,33 +565,6 @@ class Pipeline:
                     self.emitter.scroll(direction)
                     self._last_scroll_time[gesture] = now
 
-    def _update_translation(
-        self, landmarks: np.ndarray | None, dec: RecoveryDecision, now: float
-    ) -> np.ndarray:
-        if not dec.present or landmarks is None:
-            self._left_miss += 1
-            # Release movement keys immediately (fail-safe), but only recenter the neutral
-            # after a *sustained* dropout so a one-frame blip doesn't snap it (recenter macro).
-            if self._left_miss >= self.recenter_grace_frames:
-                self.left_joystick.reset_neutral()
-            self._apply_wasd(set())
-            self._release_sprint()
-            return self.left_joystick.zero()
-        self._left_miss = 0
-        if not dec.emit:
-            # Stabilizing on re-entry: feed coords so the neutral re-seeds, but emit nothing.
-            self.left_joystick.update(self.joystick_signal(landmarks))
-            self._apply_wasd(set())
-            return self.left_joystick.zero()
-        out = self.left_joystick.update(self.joystick_signal(landmarks))
-        self._update_sprint(landmarks, now)
-        target = self._wasd_targets(out)
-        if self._sprint_active:
-            # Sprint forces forward (W) held alongside Ctrl, even at joystick neutral.
-            target.add(self.bindings["forward"])
-        self._apply_wasd(target)
-        return out
-
     def _update_look(
         self, landmarks: np.ndarray | None, dec: RecoveryDecision, now: float
     ) -> np.ndarray:
@@ -523,32 +590,6 @@ class Pipeline:
         if out[0] != 0.0 or out[1] != 0.0:
             self.emitter.mouse_move(float(out[0]), float(out[1]))
         return out
-
-    def _wasd_targets(self, output: np.ndarray) -> set[str]:
-        """Translate a joystick output vector into the set of WASD keys to hold.
-
-        Uses independent joystick axes. ``x`` controls A/D. In palm-normal mode, positive
-        ``y`` means the normal points down and maps to forward (W); negative ``y`` maps back
-        (S). The legacy wrist-rotation mode also feeds its second axis through this mapping.
-        """
-        x, y = float(output[0]), float(output[1])
-        keys: set[str] = set()
-        if x > 0.0:
-            keys.add(self.bindings["right"])
-        elif x < 0.0:
-            keys.add(self.bindings["left"])
-        if y > 0.0:
-            keys.add(self.bindings["forward"])
-        elif y < 0.0:
-            keys.add(self.bindings["back"])
-        return keys
-
-    def _apply_wasd(self, target: set[str]) -> None:
-        for key in self._wasd_held - target:
-            self.emitter.key_up(key)
-        for key in target - self._wasd_held:
-            self.emitter.key_down(key)
-        self._wasd_held = target
 
     def _split(self, results: list[HandResult]) -> tuple[np.ndarray | None, np.ndarray | None]:
         """Split tracker results into left/right landmark arrays.
@@ -578,7 +619,7 @@ class Pipeline:
             binding = self.bindings.get(event.gesture)
             if binding is not None and binding not in ("scroll_up", "scroll_down"):
                 self.emitter.key_up(binding)
-        self._apply_wasd(set())
+
         self._release_sprint()
         self._last_scroll_time.clear()
         self.emitter.release_all()
@@ -620,6 +661,10 @@ def run_pipeline(
         )
 
     tracker = HandTracker.create(settings.tracking.backend, settings.tracking.device)
+    face_tracker = MediaPipeFaceTracker(
+        min_detection_confidence=settings.tracking.min_detection_confidence,
+        min_tracking_confidence=settings.tracking.min_tracking_confidence,
+    )
     buffer = FrameBuffer(source).start()
     res_w, res_h = settings.tracking.input_resolution
     mirror = settings.camera.mirror
@@ -654,7 +699,7 @@ def run_pipeline(
                 time.sleep(0.001)
                 continue
             if last_seq != -1 and seq > last_seq + 1:
-                dropped += (seq - last_seq - 1)
+                dropped += seq - last_seq - 1
             last_seq = seq
             last_frame_time = time.monotonic()
 
@@ -668,7 +713,13 @@ def run_pipeline(
             cv2.cvtColor(small_bgr, cv2.COLOR_BGR2RGB, dst=small_rgb)
 
             results = tracker.detect(small_rgb)
-            result = pipeline.step(results)
+
+            face_landmarks = None
+            face_blendshapes = None
+            if processed % settings.face.face_decimation == 0:
+                face_landmarks, face_blendshapes = face_tracker.detect(small_rgb)
+
+            result = pipeline.step(results, face_landmarks, face_blendshapes)
             processed += 1
 
             # Overlay is a debug-only luxury and not free; decimate the (HighGUI) draw to
@@ -691,6 +742,7 @@ def run_pipeline(
         pipeline.shutdown()
         buffer.stop()
         tracker.close()
+        face_tracker.close()
         if overlay:
             cv2.destroyAllWindows()
 

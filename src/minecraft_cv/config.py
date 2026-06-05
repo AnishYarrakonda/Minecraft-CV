@@ -220,26 +220,17 @@ def _default_right_gestures() -> dict[str, GestureThresholds]:
 
 def _default_left_detector_gestures() -> dict[str, GestureDetectorSettings]:
     return {
-        "jump": GestureDetectorSettings(
+        "right": GestureDetectorSettings(
             detector="pinch", finger="index", t_engage=0.30, t_release=0.45
         ),
-        "inventory": GestureDetectorSettings(
+        "forward": GestureDetectorSettings(
             detector="pinch", finger="middle", t_engage=0.30, t_release=0.45
         ),
-        "throw_item": GestureDetectorSettings(
+        "left": GestureDetectorSettings(
             detector="pinch", finger="ring", t_engage=0.30, t_release=0.45
         ),
-        "switch_offhand": GestureDetectorSettings(
+        "back": GestureDetectorSettings(
             detector="pinch", finger="pinky", t_engage=0.30, t_release=0.45
-        ),
-        "sneak": GestureDetectorSettings(
-            detector="curl_combo",
-            finger="pinky",
-            t_engage=0.95,
-            t_release=1.05,
-            mode="hold",
-            curl_fingers=("ring", "pinky"),
-            suppresses=("throw_item", "switch_offhand"),
         ),
     }
 
@@ -247,40 +238,16 @@ def _default_left_detector_gestures() -> dict[str, GestureDetectorSettings]:
 def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
     return {
         "attack": GestureDetectorSettings(
-            detector="pinch",
-            finger="index",
-            t_engage=0.30,
-            t_release=0.45,
-            conflict_group="primary_click",
+            detector="pinch", finger="index", t_engage=0.30, t_release=0.45
         ),
         "use": GestureDetectorSettings(
-            detector="pinch",
-            finger="middle",
-            t_engage=0.30,
-            t_release=0.45,
-            conflict_group="primary_click",
+            detector="pinch", finger="middle", t_engage=0.30, t_release=0.45
         ),
-        "hotbar_next": GestureDetectorSettings(
-            detector="pinch",
-            finger="ring",
-            t_engage=0.30,
-            t_release=0.45,
-            conflict_group="hotbar_scroll",
+        "jump": GestureDetectorSettings(
+            detector="pinch", finger="ring", t_engage=0.30, t_release=0.45
         ),
-        "hotbar_prev": GestureDetectorSettings(
-            detector="pinch",
-            finger="pinky",
-            t_engage=0.30,
-            t_release=0.45,
-            conflict_group="hotbar_scroll",
-        ),
-        "sprint": GestureDetectorSettings(
-            detector="curl_combo",
-            finger="ring",
-            t_engage=0.95,
-            t_release=1.05,
-            curl_fingers=("ring", "pinky"),
-            suppresses=("hotbar_next", "hotbar_prev"),
+        "sneak": GestureDetectorSettings(
+            detector="pinch", finger="pinky", t_engage=0.30, t_release=0.45
         ),
     }
 
@@ -452,6 +419,19 @@ class InventorySettings(BaseModel):
     """
 
 
+class FaceSettings(BaseModel):
+    """Settings for face landmark and blendshape tracking."""
+
+    model_config = {"extra": "forbid"}
+
+    face_decimation: int = Field(default=2, ge=1)
+    head_roll_engage: float = Field(default=15.0, ge=0.0)
+    head_roll_release: float = Field(default=10.0, ge=0.0)
+    brow_inner_up_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    jaw_open_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    nose_sneer_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 class DebugSettings(BaseModel):
     """Debug overlay + logging. Never INFO-per-frame; rate-limited counters only."""
 
@@ -520,6 +500,7 @@ class Settings(BaseSettings):
     sprint: SprintVelocitySettings = Field(default_factory=SprintVelocitySettings)
     input: InputSettings = Field(default_factory=InputSettings)
     inventory: InventorySettings = Field(default_factory=InventorySettings)
+    face: FaceSettings = Field(default_factory=FaceSettings)
     bindings: dict[str, str] = Field(default_factory=_default_bindings)
     debug: DebugSettings = Field(default_factory=DebugSettings)
 

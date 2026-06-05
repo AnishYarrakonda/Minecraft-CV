@@ -20,9 +20,7 @@ RIGHT = {
 
 
 def _guard() -> TrackingLossGuard:
-    return TrackingLossGuard(
-        PinchStateMachine("left", LEFT), PinchStateMachine("right", RIGHT)
-    )
+    return TrackingLossGuard(PinchStateMachine("left", LEFT), PinchStateMachine("right", RIGHT))
 
 
 def _names(events: list) -> set[tuple[str, str, str]]:

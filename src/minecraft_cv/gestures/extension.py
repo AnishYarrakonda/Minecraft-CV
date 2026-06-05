@@ -186,9 +186,7 @@ class _GestureTrigger:
 class ExtensionStateMachine:
     """Resolves one hand's extension-based gestures into :class:`GestureEvent` lists."""
 
-    def __init__(
-        self, hand: Hand, gestures: Mapping[str, ExtensionThresholdSpec]
-    ) -> None:
+    def __init__(self, hand: Hand, gestures: Mapping[str, ExtensionThresholdSpec]) -> None:
         """Build a state machine for one hand.
 
         Args:
@@ -230,9 +228,7 @@ class ExtensionStateMachine:
         for trigger in self._triggers:
             transition = trigger.update(fs)
             if transition is not None:
-                events.append(
-                    GestureEvent(gesture=trigger.name, action=transition, hand=self.hand)
-                )
+                events.append(GestureEvent(gesture=trigger.name, action=transition, hand=self.hand))
         return events
 
     def reset(self) -> list[GestureEvent]:
@@ -245,17 +241,13 @@ class ExtensionStateMachine:
         for trigger in self._triggers:
             transition = trigger.reset()
             if transition is not None:
-                events.append(
-                    GestureEvent(gesture=trigger.name, action=transition, hand=self.hand)
-                )
+                events.append(GestureEvent(gesture=trigger.name, action=transition, hand=self.hand))
         return events
 
     @property
     def held(self) -> set[str]:
         """Names of gestures currently in the HOLDING state."""
-        return {
-            t.name for t in self._triggers if t.state is _ExtensionState.HOLDING
-        }
+        return {t.name for t in self._triggers if t.state is _ExtensionState.HOLDING}
 
     @property
     def pulse_gestures(self) -> frozenset[str]:

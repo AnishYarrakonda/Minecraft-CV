@@ -16,7 +16,7 @@ from minecraft_cv.joystick.sprint_velocity import ENGAGE, RELEASE, SprintVelocit
 
 def _trigger(**kw: float | int | bool) -> SprintVelocityTrigger:
     params: dict[str, float | int | bool] = dict(
-        v_sprint=1.0,            # normalized z units / second
+        v_sprint=1.0,  # normalized z units / second
         trigger_frames=3,
         release_margin=0.02,
         enabled=True,

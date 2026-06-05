@@ -20,42 +20,30 @@ tracking:
   stabilization_ms: 500.0
 gestures:
   left_hand:
-    jump:
+    right:
       detector: pinch
       finger: index
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-    inventory:
+    forward:
       detector: pinch
       finger: middle
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-    throw_item:
+    left:
       detector: pinch
       finger: ring
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-    switch_offhand:
+    back:
       detector: pinch
       finger: pinky
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-    sneak:
-      detector: curl_combo
-      finger: pinky
-      mode: hold
-      t_engage: 0.95
-      t_release: 1.05
-      curl_fingers:
-      - ring
-      - pinky
-      suppresses:
-      - throw_item
-      - switch_offhand
   right_hand:
     attack:
       detector: pinch
@@ -63,40 +51,24 @@ gestures:
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-      conflict_group: primary_click
     use:
       detector: pinch
       finger: middle
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-      conflict_group: primary_click
-    hotbar_next:
+    jump:
       detector: pinch
       finger: ring
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-      conflict_group: hotbar_scroll
-    hotbar_prev:
+    sneak:
       detector: pinch
       finger: pinky
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-      conflict_group: hotbar_scroll
-    sprint:
-      detector: curl_combo
-      finger: ring
-      mode: hold
-      t_engage: 0.95
-      t_release: 1.05
-      curl_fingers:
-      - ring
-      - pinky
-      suppresses:
-      - hotbar_next
-      - hotbar_prev
 joystick:
   mode: palm_tilt
   tilt:
@@ -178,3 +150,10 @@ debug:
   overlay: true
   log_level: WARNING
   overlay_every: 1
+face:
+  face_decimation: 2
+  head_roll_engage: 15.0
+  head_roll_release: 10.0
+  brow_inner_up_threshold: 0.5
+  jaw_open_threshold: 0.5
+  nose_sneer_threshold: 0.5

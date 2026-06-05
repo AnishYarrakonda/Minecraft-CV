@@ -32,13 +32,12 @@ def test_defaults_construct_without_yaml() -> None:
     assert s.tracking.swap_handedness is True
     assert s.inventory.enabled is False
     assert set(s.gestures.left_hand) == {
-        "jump",
-        "sneak",
-        "inventory",
-        "throw_item",
-        "switch_offhand",
+        "forward",
+        "back",
+        "left",
+        "right",
     }
-    assert set(s.gestures.right_hand) == {"attack", "use", "hotbar_next", "hotbar_prev", "sprint"}
+    assert set(s.gestures.right_hand) == {"attack", "use", "jump", "sneak"}
 
     # Check new bindings exist
     assert s.bindings["sprint"] == "ctrl"
@@ -51,12 +50,7 @@ def test_load_project_config_yaml() -> None:
     assert s.camera.fps == 30
     assert s.tracking.backend == "mediapipe"
     assert s.joystick.mode == "palm_tilt"
-    assert s.gestures.left_hand["jump"].detector == "pinch"
-    assert s.gestures.left_hand["sneak"].detector == "curl_combo"
-    assert s.gestures.left_hand["sneak"].mode == "hold"
-    assert s.gestures.left_hand["sneak"].curl_fingers == ("ring", "pinky")
-    assert s.gestures.right_hand["sprint"].curl_fingers == ("ring", "pinky")
-    assert s.gestures.right_hand["sprint"].suppresses == ("hotbar_next", "hotbar_prev")
+    assert s.gestures.left_hand["forward"].detector == "pinch"
     assert s.gestures.right_hand["attack"].finger == "index"
     # input_resolution list in YAML is coerced to a tuple.
     assert s.tracking.input_resolution == (256, 256)
@@ -87,9 +81,7 @@ def test_extension_inverted_thresholds_raise() -> None:
 
 def test_detector_inverted_thresholds_raise() -> None:
     with pytest.raises(ValidationError):
-        GestureDetectorSettings(
-            detector="pinch", finger="index", t_engage=0.45, t_release=0.30
-        )
+        GestureDetectorSettings(detector="pinch", finger="index", t_engage=0.45, t_release=0.30)
 
 
 def test_equal_thresholds_raise() -> None:

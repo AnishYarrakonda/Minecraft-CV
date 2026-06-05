@@ -124,9 +124,7 @@ class PinchStateMachine:
                     f"MVP pinch gestures use one of {_FINGER_ORDER}."
                 )
             self._fingers[name] = spec.finger
-            self._triggers[name] = SchmittTrigger(
-                t_engage=spec.t_engage, t_release=spec.t_release
-            )
+            self._triggers[name] = SchmittTrigger(t_engage=spec.t_engage, t_release=spec.t_release)
 
     @classmethod
     def from_thresholds(
@@ -172,11 +170,7 @@ class PinchStateMachine:
         """Names of gestures currently in the HOLDING state."""
         from minecraft_cv.gestures.schmitt import PinchState
 
-        return {
-            name
-            for name, t in self._triggers.items()
-            if t.state is PinchState.HOLDING
-        }
+        return {name for name, t in self._triggers.items() if t.state is PinchState.HOLDING}
 
 
 __all__ = [

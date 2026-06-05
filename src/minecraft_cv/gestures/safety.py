@@ -77,9 +77,7 @@ class TrackingLossGuard:
         return events
 
     @staticmethod
-    def _resolve(
-        machine: _GestureMachine, landmarks: np.ndarray | None
-    ) -> list[AnyGestureEvent]:
+    def _resolve(machine: _GestureMachine, landmarks: np.ndarray | None) -> list[AnyGestureEvent]:
         if landmarks is None:
             return list(machine.reset())
         return list(machine.update(landmarks))
