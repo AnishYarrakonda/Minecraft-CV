@@ -173,7 +173,7 @@ def test_extra_keys_forbidden(tmp_path: Path) -> None:
 def test_look_accel_exponent_default() -> None:
     """look_accel_exponent should default to a responsive low-jitter curve."""
     s = Settings()
-    assert s.joystick.look_accel_exponent == pytest.approx(1.25)
+    assert s.joystick.look_accel_exponent == pytest.approx(1.0)
 
 
 def test_look_accel_exponent_from_yaml(tmp_path: Path) -> None:
@@ -199,6 +199,6 @@ def test_project_config_yaml_loads_new_fields() -> None:
     assert s.joystick.right_smoothing == pytest.approx(0.6)
     assert s.joystick.right_sensitivity == pytest.approx(40.0)
     assert s.joystick.look_accel_exponent == pytest.approx(1.25)
-    assert s.joystick.one_euro_min_cutoff == pytest.approx(0.1)
-    assert s.joystick.one_euro_beta == pytest.approx(0.05)
+    assert s.joystick.one_euro_min_cutoff == pytest.approx(1.5)
+    assert s.joystick.one_euro_beta == pytest.approx(0.5)
     assert s.input.mouse_delta_scale == pytest.approx(58.0)

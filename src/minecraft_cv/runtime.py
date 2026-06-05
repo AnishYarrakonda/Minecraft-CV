@@ -56,6 +56,8 @@ class FramePacket:
     fps: float = 0.0
     live: bool = False
     face: FaceResult | None = None
+    pipeline_latency_ms: float = 0.0
+    """Time from frame grab to pipeline.step() completion, in milliseconds."""
 
 
 class FrameProcessor:
@@ -103,6 +105,10 @@ class FrameProcessor:
         self.processed = 0
         self.dropped = 0
         self._t_start = time.monotonic()
+
+        # Face tracking decimation: run every Nth frame to save ~8-15ms per skipped frame.
+        self._face_frame_counter = 0
+        self._last_face_result: Any = None
 
     @classmethod
     def from_settings(
@@ -214,20 +220,28 @@ class FrameProcessor:
         if self._mirror:
             frame = cv2.flip(frame, 1)
 
+        t_start = time.monotonic()
+
         res_w, res_h = self._res
         cv2.resize(frame, (res_w, res_h), dst=self._small_bgr)
         cv2.cvtColor(self._small_bgr, cv2.COLOR_BGR2RGB, dst=self._small_rgb)
 
         results = self.tracker.detect(self._small_rgb)
-        face_result = None
+
+        # Face tracking decimation: run every 3rd frame to save processing time.
+        # Face gestures (eyebrow raise, mouth open, head tilt) change slowly enough
+        # for ~10 Hz updates. Reuse the last result on skipped frames.
+        face_result = self._last_face_result
         if self.face_tracker is not None:
-            # Face tracking also wants timestamp in ms
-            ts_ms = int(time.monotonic() * 1000)
-            # Use full-resolution frame for face tracking to avoid 256x256 squashing which breaks face detection
-            cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=self._full_rgb)
-            face_result = self.face_tracker.detect(self._full_rgb, ts_ms)
-            
+            self._face_frame_counter += 1
+            if self._face_frame_counter % 3 == 0:
+                ts_ms = int(time.monotonic() * 1000)
+                cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=self._full_rgb)
+                face_result = self.face_tracker.detect(self._full_rgb, ts_ms)
+                self._last_face_result = face_result
+
         step = self.pipeline.step(results, face_result)
+        pipeline_latency_ms = (time.monotonic() - t_start) * 1000.0
         self.processed += 1
         self._update_fps()
 
@@ -238,6 +252,7 @@ class FrameProcessor:
             fps=self._fps,
             live=self._live,
             face=face_result,
+            pipeline_latency_ms=pipeline_latency_ms,
         )
 
     def _update_fps(self) -> None:

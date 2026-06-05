@@ -420,11 +420,11 @@ class JoystickSettings(BaseModel):
     deadzone: float = Field(default=0.04, ge=0.0)
     left_sensitivity: float = Field(default=5.0, gt=0.0)
     right_sensitivity: float = Field(default=40.0, gt=0.0)
-    look_accel_exponent: float = Field(default=1.25, gt=0.0)
+    look_accel_exponent: float = Field(default=1.0, gt=0.0)
     """Exponential ease-in exponent applied to the right-hand mouse-look output."""
     smoothing: float = Field(default=0.1, ge=0.0, lt=1.0)
     """EMA smoothing factor on the tracked position (0 = none, ->1 = heavy)."""
-    right_smoothing: float | None = Field(default=0.55, ge=0.0, lt=1.0)
+    right_smoothing: float | None = Field(default=0.85, ge=0.0, lt=1.0)
     """Optional right-hand-only EMA smoothing. Keeps mouse look steady without slowing WASD."""
     fixed_left_neutral: tuple[float, float] | None = Field(default=(0.25, 0.5))
     """Optional fixed screen-space anchor (x, y) for the left joystick (WASD)."""
@@ -432,7 +432,7 @@ class JoystickSettings(BaseModel):
     """Optional fixed screen-space anchor (x, y) for the right joystick (mouse look)."""
 
     # --- Mouse-look smoothing ----------------------------------------------------------
-    look_filter: Literal["ema", "one_euro"] = "one_euro"
+    look_filter: Literal["ema", "one_euro"] = "ema"
     one_euro_min_cutoff: float = Field(default=0.65, gt=0.0)
     one_euro_beta: float = Field(default=0.035, ge=0.0)
     one_euro_d_cutoff: float = Field(default=1.0, gt=0.0)
