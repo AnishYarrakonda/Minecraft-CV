@@ -1,6 +1,7 @@
+from minecraft_cv.config import Settings
 from minecraft_cv.gestures.face_gestures import FaceGestureStateMachine
 from minecraft_cv.tracking.face_tracker import FaceResult
-from minecraft_cv.config import Settings
+
 settings = Settings().gestures.face
 sm = FaceGestureStateMachine(settings)
 print(sm.status())

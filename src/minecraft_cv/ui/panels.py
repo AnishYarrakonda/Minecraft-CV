@@ -16,9 +16,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QVBoxLayout,
     QWidget,
-    QSlider,
 )
 
 from minecraft_cv.ui import theme
@@ -228,7 +228,7 @@ class KeymapPanel(QWidget):
         lay.addWidget(cards["left"])
         lay.addWidget(cards["right"])
         lay.addWidget(cards["face"])
-        
+
         # Sensitivity slider
         self._base_sensitivity = settings.joystick.right_sensitivity
         sens_card = Card("MOUSE SENSITIVITY")
@@ -241,18 +241,18 @@ class KeymapPanel(QWidget):
         self.slider_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sens_card.add(self.slider)
         sens_card.add(self.slider_label)
-        
+
         # Sneak Sensitivity slider
         self.sneak_slider = QSlider(Qt.Orientation.Horizontal)
         self.sneak_slider.setMinimum(1)
         self.sneak_slider.setMaximum(100)
-        
+
         # Calculate initial value from config: engage = 0.50 + (val/100) * 0.49
         # => val = (engage - 0.50) / 0.49 * 100
         initial_engage = settings.gestures.head_pitch.engage_ratio if settings.gestures.head_pitch else 0.85
         initial_val = int(round((initial_engage - 0.50) / 0.49 * 100.0))
         initial_val = max(1, min(100, initial_val))
-        
+
         self.sneak_slider.setValue(initial_val)
         self.sneak_slider.valueChanged.connect(self._on_sneak_slider)
         self.sneak_slider_label = QLabel(f"{initial_val}%")
@@ -260,7 +260,7 @@ class KeymapPanel(QWidget):
         sens_card.add(QLabel("SNEAK SENSITIVITY"))
         sens_card.add(self.sneak_slider)
         sens_card.add(self.sneak_slider_label)
-        
+
         lay.addWidget(sens_card)
 
         lay.addStretch(1)

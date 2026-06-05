@@ -12,8 +12,8 @@ import threading
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
-    QPoint,
     QPauseAnimation,
+    QPoint,
     QPropertyAnimation,
     QSequentialAnimationGroup,
     Qt,

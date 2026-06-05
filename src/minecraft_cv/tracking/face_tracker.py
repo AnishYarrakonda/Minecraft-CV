@@ -83,7 +83,7 @@ class FaceTracker:
         # We requested num_faces=1, so we take the first face.
         categories = result.face_blendshapes[0]
         blendshapes = {cat.category_name: cat.score for cat in categories}
-        
+
         # Optional: extract 3D landmarks if needed for HUD rendering later
         landmarks_array = None
         if result.face_landmarks:
@@ -91,7 +91,7 @@ class FaceTracker:
             landmarks_array = np.array(
                 [[lm.x, lm.y, lm.z] for lm in raw_lms], dtype=np.float32
             )
-            
+
         return FaceResult(blendshapes=blendshapes, landmarks=landmarks_array)
 
     def close(self) -> None:

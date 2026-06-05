@@ -74,7 +74,7 @@ def test_octant_boundaries() -> None:
     # 22.4 degrees -> still Right
     ang1 = math.radians(22.4)
     assert octant_keys(np.array([math.cos(ang1), math.sin(ang1)]), _BINDINGS) == {"d"}
-    
+
     # 22.6 degrees -> crosses into Back-Right
     ang2 = math.radians(22.6)
     assert octant_keys(np.array([math.cos(ang2), math.sin(ang2)]), _BINDINGS) == {"s", "d"}

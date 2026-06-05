@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-
-from typing import TYPE_CHECKING, Any
 
 from minecraft_cv.pipeline import Pipeline, StepResult
 from minecraft_cv.tracking.tracker import HandResult, HandTracker
@@ -90,7 +88,7 @@ class FrameProcessor:
         self._small_bgr = np.empty((res_h, res_w, 3), dtype=np.uint8)
         self._small_rgb = np.empty((res_h, res_w, 3), dtype=np.uint8)
         self._res = (res_w, res_h)
-        
+
         # Pre-allocate full-res RGB frame for face tracking
         cam_w, cam_h = settings.camera.width, settings.camera.height
         self._full_rgb = np.empty((cam_h, cam_w, 3), dtype=np.uint8)

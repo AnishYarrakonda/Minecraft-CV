@@ -16,6 +16,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
+
 def octant_keys(
     output: np.ndarray,
     bindings: Mapping[str, str],

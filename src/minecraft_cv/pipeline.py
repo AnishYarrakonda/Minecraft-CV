@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import numpy as np
 
@@ -24,7 +24,7 @@ from minecraft_cv.gestures.registry import GestureStateMachine
 from minecraft_cv.gestures.safety import AnyGestureEvent, TrackingLossGuard
 from minecraft_cv.input.emitter import InputEmitter, create_emitter
 from minecraft_cv.joystick.one_euro import OneEuroFilter
-from minecraft_cv.joystick.screen import ScreenJoystick, screen_index_mcp, screen_thumb_tip
+from minecraft_cv.joystick.screen import ScreenJoystick, screen_index_mcp
 from minecraft_cv.joystick.steering import octant_keys
 from minecraft_cv.joystick.wrist_tilt import WristTiltJoystick, wrist_tilt_vector
 from minecraft_cv.recovery import HandRecovery, RecoveryDecision
@@ -33,6 +33,7 @@ from minecraft_cv.tracking.tracker import HandResult
 if TYPE_CHECKING:
     from minecraft_cv.capture.source import FrameSource
     from minecraft_cv.config import Settings
+    from minecraft_cv.gestures.face_gestures import FaceGestureStateMachine
 
 
 # Per-hand tracking status for the HUD (readable name, not a bool).
@@ -150,7 +151,7 @@ class Pipeline:
         """Build a pipeline from a :class:`Settings` model."""
         left_sm = GestureStateMachine("left", settings.gestures.left_hand)
         right_sm = GestureStateMachine("right", settings.gestures.right_hand)
-        
+
         face_sm = None
         if hasattr(settings, "face_tracking") and settings.face_tracking.enabled:
             from minecraft_cv.gestures.face_gestures import FaceGestureStateMachine
@@ -247,7 +248,7 @@ class Pipeline:
                     self._relocalize_right(right_lm)
                     relocalized_hands.add("right")
                 continue
-            
+
             binding = self.bindings.get(event.gesture)
             if binding is None:
                 continue

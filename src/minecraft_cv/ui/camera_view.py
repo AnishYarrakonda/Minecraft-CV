@@ -22,9 +22,13 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from minecraft_cv.ui import theme
 from minecraft_cv.ui.skeleton import (
-    FACE_COLOR, FACE_CONNECTIONS, FACE_KEY_LANDMARKS,
-    FINGERTIPS, HAND_CONNECTIONS,
-    fit_rect, to_widget,
+    FACE_COLOR,
+    FACE_CONNECTIONS,
+    FACE_KEY_LANDMARKS,
+    FINGERTIPS,
+    HAND_CONNECTIONS,
+    fit_rect,
+    to_widget,
 )
 
 if TYPE_CHECKING:
