@@ -1,4 +1,4 @@
-"""Sidebar panels: header controls, the live keymap, and movement/look status.
+"""Sidebar panels: header controls and the live keymap.
 
 These read a :class:`~minecraft_cv.pipeline.StepResult` each frame and update lightweight
 custom widgets; nothing here touches the OS or the pipeline directly (the window wires the
@@ -11,11 +11,11 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -26,7 +26,6 @@ from minecraft_cv.ui.widgets import (
     Card,
     HealthChip,
     IndicatorDot,
-    JoystickGizmo,
     KeyCap,
     StatusPill,
 )
@@ -140,7 +139,7 @@ class _KeymapRow(QWidget):
         super().__init__()
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(10)
+        lay.setSpacing(8)
         self.dot = IndicatorDot(accent)
         lay.addWidget(self.dot)
         text = QVBoxLayout()
@@ -169,6 +168,7 @@ class KeymapPanel(QWidget):
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         """Build the keymap from ``settings`` (bindings + gesture config)."""
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         main_lay = QVBoxLayout(self)
         main_lay.setContentsMargins(0, 0, 0, 0)
         main_lay.setSpacing(0)
@@ -176,6 +176,7 @@ class KeymapPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         # Transparent background and a custom scrollbar so it doesn't overlap content on macOS
         scroll.setStyleSheet("""
             QScrollArea { background: transparent; }
@@ -183,14 +184,14 @@ class KeymapPanel(QWidget):
             QScrollBar:vertical {
                 border: none;
                 background: rgba(255, 255, 255, 0.05);
-                width: 8px;
-                border-radius: 4px;
+                width: 6px;
+                border-radius: 3px;
                 margin: 0px 0px 0px 0px;
             }
             QScrollBar::handle:vertical {
                 background: rgba(255, 255, 255, 0.2);
-                border-radius: 4px;
-                min-height: 20px;
+                border-radius: 3px;
+                min-height: 16px;
             }
             QScrollBar::handle:vertical:hover {
                 background: rgba(255, 255, 255, 0.3);
@@ -205,8 +206,8 @@ class KeymapPanel(QWidget):
         content = QWidget()
         content.setObjectName("KeymapScrollContent")
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(0, 0, 8, 0) # 8px right margin so the scrollbar fits neatly
-        lay.setSpacing(14)
+        lay.setContentsMargins(0, 0, 6, 0)
+        lay.setSpacing(10)
 
         self._rows: dict[tuple[str, str], _KeymapRow] = {}
 
@@ -240,53 +241,4 @@ class KeymapPanel(QWidget):
             widget.set_active(gesture in held)
 
 
-class MovementPanel(QWidget):
-    """WASD key cluster + move/look gizmos."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        """Build the movement & look status card."""
-        super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        card = Card("MOVEMENT  ·  LOOK")
-        lay.addWidget(card)
-
-        # Move row: WASD cross + movement gizmo.
-        move_row = QHBoxLayout()
-        move_row.setSpacing(12)
-        self._caps = {k: KeyCap(k.upper(), theme.MOVE) for k in ("w", "a", "s", "d")}
-        cross = QGridLayout()
-        cross.setSpacing(4)
-        cross.addWidget(self._caps["w"], 0, 1)
-        cross.addWidget(self._caps["a"], 1, 0)
-        cross.addWidget(self._caps["s"], 1, 1)
-        cross.addWidget(self._caps["d"], 1, 2)
-        cross_w = QWidget()
-        cross_w.setLayout(cross)
-        move_row.addWidget(cross_w)
-        move_row.addStretch(1)
-        self._move_gizmo = JoystickGizmo(theme.MOVE, has_deadzone=True)
-        move_row.addWidget(self._move_gizmo)
-        card.body.addLayout(move_row)
-
-        # Look row.
-        look_row = QHBoxLayout()
-        look_lbl = QLabel("Mouse look")
-        look_lbl.setObjectName("RowName")
-        look_row.addWidget(look_lbl)
-        look_row.addStretch(1)
-        self._look_gizmo = JoystickGizmo(theme.LOOK, has_deadzone=False)
-        look_row.addWidget(self._look_gizmo)
-        card.body.addLayout(look_row)
-
-    def update_state(self, step: StepResult) -> None:
-        """Light the WASD caps and update both gizmos from the latest step."""
-        for letter, cap in self._caps.items():
-            cap.setActive(letter in step.wasd_held)
-        lo = step.left_output
-        self._move_gizmo.setState(float(lo[0]), float(lo[1]), step.deadzone)
-        ro = step.right_output
-        self._look_gizmo.setState(float(ro[0]) * 0.25, float(ro[1]) * 0.25)
-
-
-__all__ = ["HeaderBar", "KeymapPanel", "MovementPanel"]
+__all__ = ["HeaderBar", "KeymapPanel"]

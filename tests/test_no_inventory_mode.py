@@ -36,9 +36,14 @@ def test_open_palms_do_not_pause_wasd_or_right_look(
             ]
         )
 
-    left_forward = make_screen_landmarks()
-    left_forward[0, :2] = [0.20, 0.20]  # wrist
-    left_forward[9, :2] = [0.20, -0.20] # MCP (tilted forward -> W)
+    # Left middle pinch -> move_forward -> "w" (needs 2 frames to engage).
+    left_forward = make_screen_landmarks(offset=(0.20, 0.20), distances={"middle": 0.01})
+    pipe.step(
+        [
+            make_hand_result(left_forward, "Right"),
+            make_hand_result(right_neutral, "Left"),
+        ]
+    )
     right_look = make_screen_landmarks(offset=(0.85, 0.20))
     result = pipe.step(
         [

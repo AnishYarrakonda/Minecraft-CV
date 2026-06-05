@@ -30,10 +30,9 @@ from minecraft_cv.cli import main as cli_main  # noqa: E402
 
 
 def main() -> int:
-    """Launch the desktop app; fall back to headless debug overlay if PySide6 is absent."""
+    """Ask the user which mode to launch, then start it."""
     try:
         import PySide6  # noqa: F401
-        return cli_main(["ui", *sys.argv[1:]])
     except ImportError:
         print(
             "[main.py] PySide6 not found — launching headless mode (--no-input --debug-overlay).\n"
@@ -41,6 +40,19 @@ def main() -> int:
             file=sys.stderr,
         )
         return cli_main(["run", "--no-input", "--debug-overlay", *sys.argv[1:]])
+
+    print("minecraft_cv — choose a launch mode:")
+    print("  1  Full app    (camera + HUD sidebar)")
+    print("  2  Overlay     (compact always-on-top window)")
+    print()
+    try:
+        choice = input("Enter 1 or 2 [default: 1]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return 0
+
+    if choice == "2":
+        return cli_main(["overlay", *sys.argv[1:]])
+    return cli_main(["ui", *sys.argv[1:]])
 
 
 if __name__ == "__main__":

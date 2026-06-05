@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from minecraft_cv.capture.source import FrameSource
     from minecraft_cv.config import Settings
     from minecraft_cv.input.emitter import InputEmitter
+    from minecraft_cv.tracking.face_tracker import FaceResult
 
 # Seconds without a fresh frame before the live camera is considered stalled.
 _STALL_TIMEOUT_S = 2.0
@@ -54,6 +55,7 @@ class FramePacket:
     step: StepResult = field(default_factory=StepResult)
     fps: float = 0.0
     live: bool = False
+    face: FaceResult | None = None
 
 
 class FrameProcessor:
@@ -235,6 +237,7 @@ class FrameProcessor:
             step=step,
             fps=self._fps,
             live=self._live,
+            face=face_result,
         )
 
     def _update_fps(self) -> None:

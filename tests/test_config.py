@@ -27,15 +27,20 @@ def test_defaults_construct_without_yaml() -> None:
     assert s.camera.mirror is True  # mirror view by default
     assert s.tracking.swap_handedness is True
     assert set(s.gestures.left_hand) == {
-        "jump",
-        "sneak",
-        "recenter",
+        "move_forward",
+        "move_back",
+        "move_left",
+        "move_right",
     }
-    assert set(s.gestures.right_hand) == {"attack", "use", "hotbar_next", "hotbar_prev", "recenter"}
+    assert set(s.gestures.right_hand) == {"attack", "use", "jump", "sneak", "recenter"}
+    assert set(s.gestures.face) == {"inventory", "throw_item", "swap_offhand"}
+    assert s.gestures.head_tilt.enabled is True
 
     # Check new bindings exist
+    assert s.bindings["move_forward"] == "w"
     assert s.bindings["sneak"] == "shift"
     assert s.bindings["throw_item"] == "q"
+    assert s.bindings["hotbar_next"] == "scroll_up"
     assert "sprint" not in s.bindings
     assert "switch_offhand" not in s.bindings
 
@@ -44,21 +49,26 @@ def test_load_project_config_yaml() -> None:
     s = Settings.load(CONFIG_YAML)
     assert s.camera.fps == 30
     assert s.tracking.backend == "mediapipe"
-    assert s.gestures.left_hand["jump"].detector == "pinch"
-    assert s.gestures.left_hand["sneak"].detector == "pinch"
-    assert s.gestures.left_hand["sneak"].mode == "hold"
-    assert s.gestures.left_hand["sneak"].finger == "pinky"
-    assert s.gestures.left_hand["recenter"].detector == "extension_combo"
-    assert s.gestures.left_hand["recenter"].extension_fingers == ("index", "middle")
-    assert s.gestures.left_hand["recenter"].curl_fingers == ("ring", "pinky")
+    assert s.gestures.left_hand["move_right"].detector == "pinch"
+    assert s.gestures.left_hand["move_right"].finger == "index"
+    assert s.gestures.left_hand["move_forward"].finger == "middle"
+    assert s.gestures.left_hand["move_left"].finger == "ring"
+    assert s.gestures.left_hand["move_back"].finger == "pinky"
+    # Left-hand WASD pinches carry no conflict group (diagonals must be possible).
+    assert all(g.conflict_group is None for g in s.gestures.left_hand.values())
+    assert s.gestures.right_hand["jump"].finger == "ring"
+    assert s.gestures.right_hand["jump"].conflict_group == "jump_sneak"
+    assert s.gestures.right_hand["sneak"].finger == "pinky"
+    assert s.gestures.right_hand["sneak"].conflict_group == "jump_sneak"
     assert s.gestures.right_hand["recenter"].detector == "extension_combo"
     assert s.gestures.right_hand["recenter"].suppresses == (
         "attack",
         "use",
-        "hotbar_next",
-        "hotbar_prev",
+        "jump",
+        "sneak",
     )
     assert s.gestures.right_hand["attack"].finger == "index"
+    assert s.gestures.face["swap_offhand"].blendshape == "cheekPuff"
     # input_resolution list in YAML is coerced to a tuple.
     assert s.tracking.input_resolution == (256, 256)
 

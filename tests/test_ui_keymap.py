@@ -8,16 +8,24 @@ from minecraft_cv.ui.keymap import build_keymap, display_name, key_label
 def test_build_keymap_covers_all_bound_gestures() -> None:
     rows = {(r.hand, r.gesture): r for r in build_keymap(Settings())}
 
-    # Left-hand actions with their pretty key labels and trigger fingers.
-    assert rows[("left", "jump")].key == "Space"
-    assert rows[("left", "jump")].finger == "Index"
-    assert rows[("left", "sneak")].key == "Shift"
+    # Left-hand pinch-WASD with trigger fingers.
+    assert rows[("left", "move_right")].key == "D"
+    assert rows[("left", "move_right")].finger == "Index"
+    assert rows[("left", "move_forward")].key == "W"
+    assert rows[("left", "move_forward")].finger == "Middle"
 
-    # Right-hand combat with mouse / scroll specials.
+    # Right-hand combat + jump/sneak.
     assert rows[("right", "attack")].key == "LMB"
     assert rows[("right", "use")].key == "RMB"
-    assert rows[("right", "hotbar_next")].key == "Scroll ↑"
-    assert rows[("right", "hotbar_prev")].key == "Scroll ↓"
+    assert rows[("right", "jump")].key == "Space"
+    assert rows[("right", "sneak")].key == "Shift"
+
+    # Face gestures + head-roll scroll specials.
+    assert rows[("face", "throw_item")].key == "Q"
+    assert rows[("face", "inventory")].key == "E"
+    assert rows[("face", "swap_offhand")].key == "F"
+    assert rows[("face", "hotbar_next")].key == "Scroll ↑"
+    assert rows[("face", "hotbar_prev")].key == "Scroll ↓"
 
 
 def test_build_keymap_excludes_unbound_macros() -> None:

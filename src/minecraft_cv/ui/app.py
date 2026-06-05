@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 from minecraft_cv.runtime import FrameProcessor
 from minecraft_cv.ui import theme
 from minecraft_cv.ui.camera_view import CameraView
-from minecraft_cv.ui.panels import HeaderBar, KeymapPanel, MovementPanel
+from minecraft_cv.ui.panels import HeaderBar, KeymapPanel
 from minecraft_cv.ui.theme import apply_theme
 from minecraft_cv.ui.worker import PipelineWorker
 
@@ -90,12 +90,9 @@ class MainWindow(QMainWindow):
         sidebar.setFixedWidth(theme.SIDEBAR_WIDTH)
         side_lay = QVBoxLayout(sidebar)
         side_lay.setContentsMargins(0, 0, 0, 0)
-        side_lay.setSpacing(14)
+        side_lay.setSpacing(0)
         self._keymap = KeymapPanel(settings)
-        self._movement = MovementPanel()
-        side_lay.addWidget(self._keymap)
-        side_lay.addWidget(self._movement)
-        side_lay.addStretch(1)
+        side_lay.addWidget(self._keymap, stretch=1)
         body_lay.addWidget(sidebar)
 
         outer.addWidget(body, stretch=1)
@@ -185,7 +182,6 @@ class MainWindow(QMainWindow):
         step = packet.step
         self._header.set_status(step.left_status, step.right_status, step.face_status)
         self._keymap.update_state(step)
-        self._movement.update_state(step)
 
     def _on_error(self, message: str) -> None:
         QMessageBox.warning(self, "minecraft_cv", message)

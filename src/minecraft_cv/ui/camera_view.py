@@ -21,13 +21,19 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from minecraft_cv.ui import theme
-from minecraft_cv.ui.skeleton import FINGERTIPS, HAND_CONNECTIONS, fit_rect, to_widget
+from minecraft_cv.ui.skeleton import (
+    FACE_COLOR, FACE_CONNECTIONS, FACE_KEY_LANDMARKS,
+    FINGERTIPS, HAND_CONNECTIONS,
+    fit_rect, to_widget,
+)
 
 if TYPE_CHECKING:
     from minecraft_cv.runtime import FramePacket
 
 # Glow strokes: (pen width, alpha) drawn back-to-front for a soft neon edge.
 _GLOW_PASSES = ((9.0, 38), (5.0, 110), (2.4, 255))
+# Subtler glow for the face overlay — thinner, lower alpha to stay secondary.
+_FACE_GLOW_PASSES = ((6.0, 22), (3.0, 70), (1.4, 180))
 _IMG_RADIUS = 18
 
 
@@ -47,6 +53,7 @@ class CameraView(QWidget):
         self._pixmap: QPixmap | None = None
         self._frame_ref: object | None = None  # keep numpy buffer alive behind the QImage
         self._hands: list[object] = []
+        self._face: object | None = None
         self._live = False
         self._fps = 0.0
         self.setMinimumSize(480, 360)
@@ -61,6 +68,7 @@ class CameraView(QWidget):
         self._pixmap = QPixmap.fromImage(img)
         self._frame_ref = frame
         self._hands = list(packet.hands)
+        self._face = packet.face
         self._live = packet.live
         self._fps = packet.fps
         self.update()
@@ -92,6 +100,7 @@ class CameraView(QWidget):
         p.save()
         p.setClipPath(clip)
         p.drawPixmap(img_rect, pm, QRectF(pm.rect()))
+        self._paint_face(p, rect)
         self._paint_skeleton(p, rect)
         p.restore()
 
@@ -102,6 +111,40 @@ class CameraView(QWidget):
 
         self._paint_badges(p, img_rect)
         p.end()
+
+    def _paint_face(self, p: QPainter, rect: tuple[float, float, float, float]) -> None:
+        face = self._face
+        if face is None or face.landmarks is None:  # type: ignore[attr-defined]
+            return
+        lms = face.landmarks  # type: ignore[attr-defined]
+        if len(lms) < max(FACE_KEY_LANDMARKS) + 1:
+            return
+
+        pts = {i: to_widget(float(lms[i][0]), float(lms[i][1]), rect) for i in FACE_KEY_LANDMARKS}
+        base = QColor(FACE_COLOR)
+
+        # Glow connections.
+        for width, alpha in _FACE_GLOW_PASSES:
+            col = QColor(base)
+            col.setAlpha(alpha)
+            pen = QPen(col, width)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
+            for a, b in FACE_CONNECTIONS:
+                ax, ay = pts[a]
+                bx, by = pts[b]
+                p.drawLine(QPointF(ax, ay), QPointF(bx, by))
+
+        # Key-point dots.
+        p.setPen(Qt.PenStyle.NoPen)
+        for px, py in pts.values():
+            glow = QColor(base)
+            glow.setAlpha(50)
+            p.setBrush(glow)
+            p.drawEllipse(QPointF(px, py), 4.0, 4.0)
+            p.setBrush(base)
+            p.drawEllipse(QPointF(px, py), 1.8, 1.8)
 
     def _paint_skeleton(self, p: QPainter, rect: tuple[float, float, float, float]) -> None:
         for hand in self._hands:
@@ -136,27 +179,27 @@ class CameraView(QWidget):
         text = "LIVE" if self._live else "DRY RUN"
         font = QFont()
         font.setFamilies(["SF Mono", "Menlo", "Consolas"])
-        font.setPointSize(10)
+        font.setPointSize(9)
         font.setBold(True)
         p.setFont(font)
 
         # Mode badge, bottom-left.
-        pill = QRectF(img_rect.left() + 14, img_rect.bottom() - 38, 96, 24)
+        pill = QRectF(img_rect.left() + 12, img_rect.bottom() - 32, 84, 20)
         bg = QColor(0, 0, 0, 130)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(bg)
-        p.drawRoundedRect(pill, 12, 12)
+        p.drawRoundedRect(pill, 10, 10)
         p.setBrush(accent)
-        p.drawEllipse(QPointF(pill.left() + 13, pill.center().y()), 4, 4)
+        p.drawEllipse(QPointF(pill.left() + 11, pill.center().y()), 3, 3)
         p.setPen(accent)
-        p.drawText(pill.adjusted(24, 0, -6, 0),
+        p.drawText(pill.adjusted(20, 0, -5, 0),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
         # FPS, bottom-right.
-        fps_rect = QRectF(img_rect.right() - 96, img_rect.bottom() - 38, 82, 24)
+        fps_rect = QRectF(img_rect.right() - 88, img_rect.bottom() - 32, 74, 20)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(0, 0, 0, 130))
-        p.drawRoundedRect(fps_rect, 12, 12)
+        p.drawRoundedRect(fps_rect, 10, 10)
         p.setPen(QColor(theme.TEXT))
         p.drawText(fps_rect.adjusted(10, 0, -10, 0),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,

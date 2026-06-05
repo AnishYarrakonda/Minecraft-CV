@@ -21,6 +21,40 @@ HAND_CONNECTIONS: tuple[tuple[int, int], ...] = (
 # Landmark indices that are fingertips (drawn slightly larger / brighter).
 FINGERTIPS: tuple[int, ...] = (4, 8, 12, 16, 20)
 
+# --- Face overlay (MediaPipe FaceLandmarker, 478 points) ---------------------
+
+# Sparse key feature points: eye corners + lid centers, eyebrow arches, nose tip,
+# mouth corners + lip centers, chin.  Just enough to confirm face tracking is live.
+FACE_KEY_LANDMARKS: tuple[int, ...] = (
+    # Left eye (model-left = viewer's right in a mirrored feed)
+    33, 133, 159, 145,
+    # Right eye
+    263, 362, 386, 374,
+    # Eyebrow outer/inner arch, both sides
+    70, 105, 300, 334,
+    # Nose tip
+    4,
+    # Mouth corners + lip centers
+    61, 291, 13, 17,
+    # Chin
+    152,
+)
+
+# Minimal connections: 4-point eye ovals, single eyebrow segments, mouth quad.
+FACE_CONNECTIONS: tuple[tuple[int, int], ...] = (
+    # Left eye oval
+    (33, 159), (159, 133), (133, 145), (145, 33),
+    # Right eye oval
+    (263, 386), (386, 362), (362, 374), (374, 263),
+    # Eyebrows (single line per side)
+    (70, 105), (300, 334),
+    # Mouth outer quad
+    (61, 13), (13, 291), (291, 17), (17, 61),
+)
+
+# Accent color for the face overlay — cyan, distinct from hand blues/indigo.
+FACE_COLOR = "#22D3EE"
+
 
 def fit_rect(
     img_w: float, img_h: float, widget_w: float, widget_h: float
@@ -64,4 +98,8 @@ def to_widget(
     return (x + norm_x * w, y + norm_y * h)
 
 
-__all__ = ["FINGERTIPS", "HAND_CONNECTIONS", "fit_rect", "to_widget"]
+__all__ = [
+    "FACE_COLOR", "FACE_CONNECTIONS", "FACE_KEY_LANDMARKS",
+    "FINGERTIPS", "HAND_CONNECTIONS",
+    "fit_rect", "to_widget",
+]

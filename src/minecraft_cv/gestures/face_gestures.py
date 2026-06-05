@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Literal
 
 from minecraft_cv.gestures.registry import GestureEvent
@@ -10,6 +11,11 @@ from minecraft_cv.gestures.schmitt import KEY_DOWN, KEY_UP
 from minecraft_cv.tracking.face_tracker import FaceResult
 
 logger = logging.getLogger(__name__)
+
+# MediaPipe FaceMesh landmark indices for the outer eye corners. The image-plane line
+# between them gives a stable head-roll (ear-to-shoulder tilt) signal.
+LEFT_EYE_OUTER = 33
+RIGHT_EYE_OUTER = 263
 
 # State machine for each face gesture
 class FaceGestureDetector:
@@ -60,11 +66,125 @@ class FaceGestureDetector:
         return events
 
 
-class FaceGestureStateMachine:
-    """Manages all face gestures."""
+def _head_roll_deg(result: FaceResult) -> float | None:
+    """Head-roll angle in degrees from the eye-corner line, or None if no face landmarks.
 
-    def __init__(self, settings: dict[str, Any]) -> None:
-        """Initialize from face gesture settings."""
+    Uses the 478-landmark FaceMesh array carried on ``result.landmarks`` (x/y normalized to
+    ``[0, 1]`` in frame space, y growing downward). Roll is ``atan2(dy, dx)`` of the vector
+    from the left to the right outer eye corner: 0 = upright, positive = the eye line rotates
+    so the right-eye corner drops below the left. The physical tilt direction that yields a
+    positive angle depends on whether the camera feed is mirrored; the left/right gesture names
+    are configurable so the mapping can be swapped without code changes.
+    """
+    landmarks = result.landmarks
+    if landmarks is None or len(landmarks) <= RIGHT_EYE_OUTER:
+        return None
+    left = landmarks[LEFT_EYE_OUTER]
+    right = landmarks[RIGHT_EYE_OUTER]
+    dx = float(right[0] - left[0])
+    dy = float(right[1] - left[1])
+    return math.degrees(math.atan2(dy, dx))
+
+
+class HeadRollDetector:
+    """Sign-gated Schmitt trigger over head-roll angle, emitting left/right scroll gestures.
+
+    Two mutually-exclusive directions share one angle signal: rolling past ``+engage_deg``
+    fires ``left_gesture``; rolling past ``-engage_deg`` fires ``right_gesture``. Each releases
+    when the angle returns inside its ``release_deg`` band. Frame-count debounce mirrors
+    :class:`FaceGestureDetector`. Emitted KEY_DOWN/KEY_UP events drive the pipeline's existing
+    scroll-repeat path, so a held tilt scrolls continuously at ``scroll_repeat_rate_hz``.
+    """
+
+    def __init__(
+        self,
+        left_gesture: str,
+        right_gesture: str,
+        engage_deg: float,
+        release_deg: float,
+        engage_frames: int = 2,
+        release_frames: int = 2,
+    ) -> None:
+        """Initialize with the left/right gesture ids and degree thresholds."""
+        self.left_gesture = left_gesture
+        self.right_gesture = right_gesture
+        self.engage_deg = engage_deg
+        self.release_deg = release_deg
+        self.engage_frames = engage_frames
+        self.release_frames = release_frames
+
+        # "active" is None, "left", or "right" — only one direction can hold at a time.
+        self._active: Literal["left", "right"] | None = None
+        self._consecutive_above = 0
+        self._consecutive_below = 0
+
+    @property
+    def names(self) -> tuple[str, str]:
+        """The (left, right) gesture ids this detector can emit."""
+        return (self.left_gesture, self.right_gesture)
+
+    def _name(self, direction: Literal["left", "right"]) -> str:
+        return self.left_gesture if direction == "left" else self.right_gesture
+
+    def update(self, result: FaceResult) -> list[GestureEvent]:
+        """Update with the latest face result and emit scroll-gesture transitions."""
+        roll = _head_roll_deg(result)
+        events: list[GestureEvent] = []
+
+        if self._active is not None:
+            # Release when the angle falls back inside the release band for this direction.
+            inside = roll is None or abs(roll) <= self.release_deg
+            wrong_side = (
+                roll is not None
+                and (
+                    (self._active == "left" and roll < 0)
+                    or (self._active == "right" and roll > 0)
+                )
+            )
+            if inside or wrong_side:
+                self._consecutive_below += 1
+                if self._consecutive_below >= self.release_frames:
+                    events.append(GestureEvent(self._name(self._active), KEY_UP, "face"))
+                    self._active = None
+                    self._consecutive_below = 0
+                    self._consecutive_above = 0
+            else:
+                self._consecutive_below = 0
+            return events
+
+        # Inactive: look for a sustained roll past the engage threshold.
+        if roll is None or abs(roll) < self.engage_deg:
+            self._consecutive_above = 0
+            return events
+        direction: Literal["left", "right"] = "left" if roll > 0 else "right"
+        self._consecutive_above += 1
+        if self._consecutive_above >= self.engage_frames:
+            events.append(GestureEvent(self._name(direction), KEY_DOWN, "face"))
+            self._active = direction
+            self._consecutive_above = 0
+            self._consecutive_below = 0
+        return events
+
+    def reset(self) -> list[GestureEvent]:
+        """Force-release the held direction (fail-safe on face dropout)."""
+        events: list[GestureEvent] = []
+        if self._active is not None:
+            events.append(GestureEvent(self._name(self._active), KEY_UP, "face"))
+            self._active = None
+        self._consecutive_above = 0
+        self._consecutive_below = 0
+        return events
+
+
+class FaceGestureStateMachine:
+    """Manages all face gestures (blendshape gestures + head-roll scroll)."""
+
+    def __init__(
+        self,
+        settings: dict[str, Any],
+        head_roll: Any | None = None,
+    ) -> None:
+        """Initialize from face gesture settings and optional head-roll settings."""
         self._detectors: list[FaceGestureDetector] = []
         for name, config in settings.items():
             detector = FaceGestureDetector(
@@ -76,7 +196,18 @@ class FaceGestureStateMachine:
                 release_frames=config.release_frames,
             )
             self._detectors.append(detector)
-        
+
+        self._head_roll: HeadRollDetector | None = None
+        if head_roll is not None and getattr(head_roll, "enabled", True):
+            self._head_roll = HeadRollDetector(
+                left_gesture=head_roll.left_gesture,
+                right_gesture=head_roll.right_gesture,
+                engage_deg=head_roll.engage_deg,
+                release_deg=head_roll.release_deg,
+                engage_frames=head_roll.engage_frames,
+                release_frames=head_roll.release_frames,
+            )
+
         self._last_result = FaceResult()
 
     def update(self, result: FaceResult) -> list[GestureEvent]:
@@ -85,14 +216,23 @@ class FaceGestureStateMachine:
         events = []
         for detector in self._detectors:
             events.extend(detector.update(result))
+        if self._head_roll is not None:
+            events.extend(self._head_roll.update(result))
         return events
-    
+
+    def active_gestures(self) -> frozenset[str]:
+        """The set of currently-held face gesture ids (blendshape gestures + head roll)."""
+        names = {d.name for d in self._detectors if d._is_active}
+        if self._head_roll is not None and self._head_roll._active is not None:
+            names.add(self._head_roll._name(self._head_roll._active))
+        return frozenset(names)
+
     def status(self) -> Literal["tracking", "absent"]:
         """Return tracking status based on latest result."""
-        if self._last_result.blendshapes:
+        if self._last_result.blendshapes or self._last_result.landmarks is not None:
             return "tracking"
         return "absent"
-    
+
     def reset(self) -> list[GestureEvent]:
         """Force release all active gestures."""
         events = []
@@ -102,4 +242,6 @@ class FaceGestureStateMachine:
                 detector._consecutive_above = 0
                 detector._consecutive_below = 0
                 events.append(GestureEvent(detector.name, KEY_UP, "face"))
+        if self._head_roll is not None:
+            events.extend(self._head_roll.reset())
         return events

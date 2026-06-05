@@ -280,14 +280,14 @@ class Card(QFrame):
         super().__init__(parent)
         self.setObjectName("Card")
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 16)
-        outer.setSpacing(10)
+        outer.setContentsMargins(12, 10, 12, 12)
+        outer.setSpacing(7)
         self._title = QLabel(title)
         self._title.setObjectName("CardTitle")
         outer.addWidget(self._title)
         self.body = QVBoxLayout()
         self.body.setContentsMargins(0, 0, 0, 0)
-        self.body.setSpacing(8)
+        self.body.setSpacing(6)
         outer.addLayout(self.body)
 
     def add(self, widget: QWidget) -> None:

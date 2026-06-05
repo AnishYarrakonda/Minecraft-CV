@@ -22,7 +22,36 @@ def test_left_pinch_mapping_from_default_config(
     lm = make_landmarks({"index": 0.20})
     sm.update(lm)
     events = sm.update(lm)
-    assert ("jump", KEY_DOWN, "left") in _names(events)
+    # Left index pinch now drives WASD "right" (D), not jump.
+    assert ("move_right", KEY_DOWN, "left") in _names(events)
+
+
+def test_left_wasd_pinch_finger_map(
+    make_landmarks: Callable[..., np.ndarray],
+) -> None:
+    """Each left-hand finger pinch maps to its WASD direction."""
+    expected = {
+        "index": "move_right",
+        "middle": "move_forward",
+        "ring": "move_left",
+        "pinky": "move_back",
+    }
+    for finger, gesture in expected.items():
+        sm = GestureStateMachine("left", Settings().gestures.left_hand)
+        lm = make_landmarks({finger: 0.20})
+        sm.update(lm)
+        assert _names(sm.update(lm)) == {(gesture, KEY_DOWN, "left")}
+
+
+def test_left_simultaneous_pinches_allow_diagonal(
+    make_landmarks: Callable[..., np.ndarray],
+) -> None:
+    """Two simultaneous left pinches hold both directions (no conflict group)."""
+    sm = GestureStateMachine("left", Settings().gestures.left_hand)
+    diag = make_landmarks({"middle": 0.20, "index": 0.20})
+    sm.update(diag)
+    sm.update(diag)
+    assert sm.held == {"move_forward", "move_right"}
 
 
 def test_curl_only_requires_other_fingers_open(
@@ -80,34 +109,52 @@ def test_curl_combo_requires_all_listed_fingers_down_but_ignores_others(
     assert _names(released) == {("combo", KEY_UP, "right")}
 
 
-def test_left_pinky_pinch_holds_sneak(
+def test_left_pinky_pinch_holds_move_back(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = GestureStateMachine("left", Settings().gestures.left_hand)
-    sneak = make_landmarks({"pinky": 0.20})
-    sm.update(sneak)
-    events = sm.update(sneak)
-    assert _names(events) == {("sneak", KEY_DOWN, "left")}
-    assert sm.held == {"sneak"}
+    back = make_landmarks({"pinky": 0.20})
+    sm.update(back)
+    events = sm.update(back)
+    assert _names(events) == {("move_back", KEY_DOWN, "left")}
+    assert sm.held == {"move_back"}
 
     open_hand = make_landmarks({"pinky": 1.0})
     sm.update(open_hand)
     events = sm.update(open_hand)
-    assert _names(events) == {("sneak", KEY_UP, "left")}
+    assert _names(events) == {("move_back", KEY_UP, "left")}
     assert sm.held == set()
+
+
+def test_right_ring_pinky_pinch_jump_sneak_exclusive(
+    make_landmarks: Callable[..., np.ndarray],
+) -> None:
+    """Right ring -> jump, pinky -> sneak; they are mutually exclusive (jump_sneak group)."""
+    sm = GestureStateMachine("right", Settings().gestures.right_hand)
+    ring = make_landmarks({"ring": 0.20})
+    sm.update(ring)
+    assert _names(sm.update(ring)) == {("jump", KEY_DOWN, "right")}
+
+    # Stronger (closer) pinky engages and wins the jump_sneak group; jump is released.
+    # Pinky needs its own engage debounce before it can take the group.
+    both = make_landmarks({"ring": 0.25, "pinky": 0.20})
+    for _ in range(3):
+        sm.update(both)
+    assert sm.held == {"sneak"}
 
 
 def test_extension_combo_peace_sign_triggers_recenter_thumb_ignored(
     make_screen_landmarks: Callable[..., np.ndarray],
 ) -> None:
-    sm = GestureStateMachine("left", {"recenter": Settings().gestures.left_hand["recenter"]})
+    # Recenter (peace-sign mouse-lift clutch) now lives only on the right hand.
+    sm = GestureStateMachine("right", {"recenter": Settings().gestures.right_hand["recenter"]})
     peace_thumb_relaxed = make_screen_landmarks(
         extensions={"index": 1.3, "middle": 1.3, "ring": 0.8, "pinky": 0.8},
         thumb_ext=0.2,
     )
     sm.update(peace_thumb_relaxed)
     events = sm.update(peace_thumb_relaxed)
-    assert _names(events) == {("recenter", KEY_DOWN, "left")}
+    assert _names(events) == {("recenter", KEY_DOWN, "right")}
 
     peace_thumb_open = make_screen_landmarks(
         extensions={"index": 1.3, "middle": 1.3, "ring": 0.8, "pinky": 0.8},
@@ -133,7 +180,7 @@ def test_extension_combo_requires_ring_and_pinky_curled(
     assert _names(released) == {("recenter", KEY_UP, "right")}
 
 
-def test_pinky_pinch_is_sneak(
+def test_left_pinky_pinch_is_move_back(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
     sm = GestureStateMachine("left", Settings().gestures.left_hand)
@@ -141,7 +188,7 @@ def test_pinky_pinch_is_sneak(
     sm.update(pinky)
     events = sm.update(pinky)
     assert _names(events) == {
-        ("sneak", KEY_DOWN, "left"),
+        ("move_back", KEY_DOWN, "left"),
     }
 
 

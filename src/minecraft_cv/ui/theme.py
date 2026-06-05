@@ -35,7 +35,7 @@ MONO_FONTS = '"SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace'
 # --- Geometry ----------------------------------------------------------------
 RADIUS_CARD = 8
 RADIUS_CAP = 6
-SIDEBAR_WIDTH = 320
+SIDEBAR_WIDTH = 260
 
 
 def color(hex_str: str, alpha: int = 255) -> QColor:

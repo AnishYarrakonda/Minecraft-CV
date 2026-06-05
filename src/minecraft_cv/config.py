@@ -243,25 +243,20 @@ def _default_right_gestures() -> dict[str, GestureThresholds]:
 
 
 def _default_left_detector_gestures() -> dict[str, GestureDetectorSettings]:
+    # Left hand is pure movement: thumb-to-fingertip pinches drive WASD. No conflict
+    # groups, so two simultaneous pinches produce a diagonal (e.g. middle+index -> W+D).
     return {
-        "jump": GestureDetectorSettings(
+        "move_right": GestureDetectorSettings(
             detector="pinch", finger="index", t_engage=0.30, t_release=0.45
         ),
-        "sneak": GestureDetectorSettings(
-            detector="pinch",
-            finger="pinky",
-            t_engage=0.30,
-            t_release=0.45,
+        "move_forward": GestureDetectorSettings(
+            detector="pinch", finger="middle", t_engage=0.30, t_release=0.45
         ),
-        "recenter": GestureDetectorSettings(
-            detector="extension_combo",
-            finger="index",
-            t_engage=1.15,
-            t_release=1.05,
-            mode="hold",
-            extension_fingers=("index", "middle"),
-            curl_fingers=("ring", "pinky"),
-            suppresses=("jump", "sneak"),
+        "move_left": GestureDetectorSettings(
+            detector="pinch", finger="ring", t_engage=0.30, t_release=0.45
+        ),
+        "move_back": GestureDetectorSettings(
+            detector="pinch", finger="pinky", t_engage=0.30, t_release=0.45
         ),
     }
 
@@ -281,19 +276,19 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             t_release=0.45,
             conflict_group="primary_click",
         ),
-        "hotbar_next": GestureDetectorSettings(
+        "jump": GestureDetectorSettings(
             detector="pinch",
             finger="ring",
             t_engage=0.30,
             t_release=0.45,
-            conflict_group="hotbar_scroll",
+            conflict_group="jump_sneak",
         ),
-        "hotbar_prev": GestureDetectorSettings(
+        "sneak": GestureDetectorSettings(
             detector="pinch",
             finger="pinky",
             t_engage=0.30,
             t_release=0.45,
-            conflict_group="hotbar_scroll",
+            conflict_group="jump_sneak",
         ),
         "recenter": GestureDetectorSettings(
             detector="extension_combo",
@@ -303,7 +298,7 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             mode="hold",
             extension_fingers=("index", "middle"),
             curl_fingers=("ring", "pinky"),
-            suppresses=("attack", "use", "hotbar_next", "hotbar_prev"),
+            suppresses=("attack", "use", "jump", "sneak"),
         ),
     }
 
@@ -344,12 +339,41 @@ def _default_face_gestures() -> dict[str, FaceGestureDetectorSettings]:
             engage_frames=2,
         ),
         "swap_offhand": FaceGestureDetectorSettings(
-            blendshape="eyeBlinkLeft",
+            blendshape="cheekPuff",  # puff up cheeks -> F (swap offhand)
             t_engage=0.5,
             t_release=0.3,
             engage_frames=3,
         ),
     }
+
+
+class HeadRollGestureSettings(BaseModel):
+    """Head-roll (ear-to-shoulder tilt) gesture thresholds, in degrees.
+
+    The signal is the roll angle of the eye-corner line in the image plane (0 = upright;
+    positive = head rolled toward the user's left shoulder). Two sign-gated Schmitt states
+    fire ``left_gesture`` / ``right_gesture``, which are bound to scroll up / down. Hysteresis
+    requires ``engage_deg > release_deg`` so a head held just past the threshold doesn't chatter.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    enabled: bool = True
+    left_gesture: str = "hotbar_next"  # roll toward left shoulder  -> scroll up
+    right_gesture: str = "hotbar_prev"  # roll toward right shoulder -> scroll down
+    engage_deg: float = Field(default=12.0, gt=0.0)
+    release_deg: float = Field(default=7.0, gt=0.0)
+    engage_frames: int = Field(default=2, ge=1)
+    release_frames: int = Field(default=2, ge=1)
+
+    @model_validator(mode="after")
+    def _check_hysteresis(self) -> HeadRollGestureSettings:
+        if not self.engage_deg > self.release_deg:
+            raise ValueError(
+                f"engage_deg ({self.engage_deg}) must be strictly greater than "
+                f"release_deg ({self.release_deg}) for head-roll gestures."
+            )
+        return self
 
 
 class GestureSettings(BaseModel):
@@ -366,6 +390,7 @@ class GestureSettings(BaseModel):
     face: dict[str, FaceGestureDetectorSettings] = Field(
         default_factory=_default_face_gestures
     )
+    head_tilt: HeadRollGestureSettings = Field(default_factory=HeadRollGestureSettings)
 
 
 class JoystickSettings(BaseModel):
@@ -422,22 +447,23 @@ class DebugSettings(BaseModel):
 
 def _default_bindings() -> dict[str, str]:
     return {
-        # Left-hand discrete gestures.
-        "jump": "space",
-        "sneak": "shift",
-        "inventory": "e",
-        "throw_item": "q",
-        "swap_offhand": "f",
-        # Right-hand discrete gestures.
+        # Left-hand pinch-WASD movement.
+        "move_forward": "w",
+        "move_back": "s",
+        "move_left": "a",
+        "move_right": "d",
+        # Right-hand pinch gestures.
         "attack": "mouse_left",
         "use": "mouse_right",
+        "jump": "space",
+        "sneak": "shift",
+        # Face gestures.
+        "throw_item": "q",
+        "inventory": "e",
+        "swap_offhand": "f",
+        # Head-roll -> hotbar scroll.
         "hotbar_next": "scroll_up",
         "hotbar_prev": "scroll_down",
-        # Left-hand spatial-joystick translation -> WASD.
-        "forward": "w",
-        "back": "s",
-        "left": "a",
-        "right": "d",
     }
 
 

@@ -130,6 +130,26 @@ def build_keymap(settings: Settings) -> list[KeyRow]:
                     finger=_finger_label(getattr(spec, "finger", "")),
                 )
             )
+
+    # Head-roll scroll gestures live in a single settings block, not a gesture dict.
+    head = getattr(settings.gestures, "head_tilt", None)
+    if head is not None and getattr(head, "enabled", False):
+        for gesture, descriptor in (
+            (head.left_gesture, "Head roll left"),
+            (head.right_gesture, "Head roll right"),
+        ):
+            binding = bindings.get(gesture)
+            if binding is None:
+                continue
+            rows.append(
+                KeyRow(
+                    gesture=gesture,
+                    name=display_name(gesture),
+                    key=key_label(binding),
+                    hand="face",
+                    finger=descriptor,
+                )
+            )
     return rows
 
 

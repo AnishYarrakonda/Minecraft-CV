@@ -34,41 +34,56 @@ def test_right_joystick_still_carries_right_specific_sensitivity(
     assert pipe.left_joystick.smoothing == pytest.approx(0.1)
     assert pipe.right_joystick.smoothing == pytest.approx(0.7)
 
-def test_wrist_tilt_joystick_anchors_first_frame(
+def test_left_tilt_no_longer_drives_wasd(
     null_emitter: NullEmitter,
     make_screen_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
+    """The left tilt-joystick is removed: tilting the hand emits no movement keys."""
     pipe = _pipeline(null_emitter)
-
-    # Stabilize with a straight hand (wrist and MCP at x=0.5, y=0.5, 0.3)
     base_lm = make_screen_landmarks()
     base_lm[0, :2] = [0.5, 0.5]  # wrist
     base_lm[9, :2] = [0.5, 0.3]  # middle MCP (pointing up)
     for _ in range(5):
-        res1 = pipe.step([make_hand_result(base_lm, "Right")])
-    assert res1.wasd_held == frozenset()
+        pipe.step([make_hand_result(base_lm, "Right")])
 
-    # Tilt wrist forward (W) by moving the wrist down relative to the MCP
     tilted_lm = base_lm.copy()
-    tilted_lm[0, :2] = [0.5, 0.6]  # wrist moved down -> hand tilted more up
-    tilted_lm[9, :2] = [0.5, 0.2]  # MCP moved up
-    res2 = pipe.step([make_hand_result(tilted_lm, "Right")])
-    assert "w" in res2.wasd_held
+    tilted_lm[0, :2] = [0.5, 0.6]
+    tilted_lm[9, :2] = [0.5, 0.2]
+    res = pipe.step([make_hand_result(tilted_lm, "Right")])
+    assert res.wasd_held == frozenset()
+    assert not any(e[0] == "key_down" and e[1] in ("w", "a", "s", "d") for e in null_emitter.log)
 
-def test_left_pinch_jump(
+
+def test_left_pinch_drives_wasd(
     null_emitter: NullEmitter,
     make_screen_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
 ) -> None:
+    # swap_handedness=True: a "Right"-labeled hand drives the user's LEFT (movement) SM.
     pipe = _pipeline(null_emitter)
-    # Stabilize
     for _ in range(5):
         pipe.step([make_hand_result(make_screen_landmarks(), "Right")])
-    # Pinch frames (needs 2 consecutive to engage)
+    # Index pinch -> move_right -> "d" (needs 2 consecutive frames to engage).
     lm = make_screen_landmarks(distances={"index": 0.01})
     pipe.step([make_hand_result(lm, "Right")])
-    pipe.step([make_hand_result(lm, "Right")])
+    res = pipe.step([make_hand_result(lm, "Right")])
+    assert ("key_down", "d") in null_emitter.log
+    assert res.wasd_held == frozenset({"d"})
+
+
+def test_right_ring_pinch_jumps(
+    null_emitter: NullEmitter,
+    make_screen_landmarks: Callable[..., np.ndarray],
+    make_hand_result: Callable[..., HandResult],
+) -> None:
+    # A "Left"-labeled hand drives the user's RIGHT (combat) SM under swap_handedness.
+    pipe = _pipeline(null_emitter)
+    for _ in range(5):
+        pipe.step([make_hand_result(make_screen_landmarks(), "Left")])
+    lm = make_screen_landmarks(distances={"ring": 0.01})
+    pipe.step([make_hand_result(lm, "Left")])
+    pipe.step([make_hand_result(lm, "Left")])
     assert ("key_down", "space") in null_emitter.log
 
 
@@ -81,18 +96,19 @@ def test_left_pinches_are_held_not_tapped(
     for _ in range(5):
         pipe.step([make_hand_result(make_screen_landmarks(), "Right")])
 
-    sneak = make_screen_landmarks(distances={"pinky": 0.01})
-    pipe.step([make_hand_result(sneak, "Right")])
-    pipe.step([make_hand_result(sneak, "Right")])
-    assert ("key_down", "shift") in null_emitter.log
-    assert ("key_tap", "shift") not in null_emitter.log
-    assert "shift" in null_emitter.held_keys
+    # Left pinky pinch -> move_back -> "s", held while pinched.
+    back = make_screen_landmarks(distances={"pinky": 0.01})
+    pipe.step([make_hand_result(back, "Right")])
+    pipe.step([make_hand_result(back, "Right")])
+    assert ("key_down", "s") in null_emitter.log
+    assert ("key_tap", "s") not in null_emitter.log
+    assert "s" in null_emitter.held_keys
 
     released = make_screen_landmarks(distances={"pinky": 1.0})
     pipe.step([make_hand_result(released, "Right")])
     pipe.step([make_hand_result(released, "Right")])
-    assert ("key_up", "shift") in null_emitter.log
-    assert "shift" not in null_emitter.held_keys
+    assert ("key_up", "s") in null_emitter.log
+    assert "s" not in null_emitter.held_keys
 
 def test_tracking_loss_releases_held_keys(
     null_emitter: NullEmitter,
@@ -100,54 +116,19 @@ def test_tracking_loss_releases_held_keys(
     make_hand_result: Callable[..., HandResult],
 ) -> None:
     pipe = _pipeline(null_emitter)
-    # Stabilize
-    base_lm = make_screen_landmarks()
-    base_lm[0, :2] = [0.5, 0.5]
-    base_lm[9, :2] = [0.5, 0.3]
+    # Stabilize, then hold a movement key via a left middle pinch (-> "w").
     for _ in range(5):
-        pipe.step([make_hand_result(base_lm, "Right")])
-    
-    # Tilt forward
-    tilted_lm = base_lm.copy()
-    tilted_lm[0, :2] = [0.5, 0.6]
-    tilted_lm[9, :2] = [0.5, 0.2]
-    pipe.step([make_hand_result(tilted_lm, "Right")])
+        pipe.step([make_hand_result(make_screen_landmarks(), "Right")])
+    forward = make_screen_landmarks(distances={"middle": 0.01})
+    pipe.step([make_hand_result(forward, "Right")])
+    pipe.step([make_hand_result(forward, "Right")])
     assert "w" in null_emitter.held_keys
 
-    # Tracking drop for 10 frames > grace period (3)
+    # Tracking drop for 10 frames > grace period: held key must be released (fail-safe).
     for _ in range(10):
         pipe.step([])
 
     assert "w" not in null_emitter.held_keys
-
-
-def test_left_peace_relocalizes_left_joystick_only(
-    null_emitter: NullEmitter,
-    make_screen_landmarks: Callable[..., np.ndarray],
-    make_hand_result: Callable[..., HandResult],
-) -> None:
-    pipe = _pipeline(null_emitter)
-    left_base = make_screen_landmarks(offset=(0.20, 0.20))
-    right_base = make_screen_landmarks(offset=(0.65, 0.20))
-    for _ in range(4):
-        pipe.step([
-            make_hand_result(left_base, "Right"),
-            make_hand_result(right_base, "Left"),
-        ])
-
-    old_right = pipe.right_joystick.neutral.copy()
-    peace = make_screen_landmarks(
-        offset=(0.42, 0.34),
-        extensions={"index": 1.3, "middle": 1.3, "ring": 0.8, "pinky": 0.8},
-        thumb_ext=0.2,
-    )
-    pipe.step([make_hand_result(peace, "Right"), make_hand_result(right_base, "Left")])
-    res = pipe.step([make_hand_result(peace, "Right"), make_hand_result(right_base, "Left")])
-
-    assert res.relocalized_hands == frozenset({"left"})
-    assert np.allclose(pipe.left_joystick.neutral, pipe.left_joystick_signal(peace))
-    assert np.allclose(pipe.right_joystick.neutral, old_right)
-    assert ("key_down", "shift") not in null_emitter.log
 
 
 def test_right_peace_relocalizes_right_joystick_without_clicks(

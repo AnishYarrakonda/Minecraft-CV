@@ -102,7 +102,7 @@ def test_set_emitter_releases_held_keys_on_old_emitter(
     pinch = make_screen_landmarks(distances={"index": 0.01})
     pipe.step([make_hand_result(pinch, "Right")])
     pipe.step([make_hand_result(pinch, "Right")])
-    assert "space" in old.held_keys
+    assert "d" in old.held_keys  # left index pinch -> move_right -> "d"
 
     new = NullEmitter()
     pipe.set_emitter(new)

@@ -154,7 +154,10 @@ class Pipeline:
         face_sm = None
         if hasattr(settings, "face_tracking") and settings.face_tracking.enabled:
             from minecraft_cv.gestures.face_gestures import FaceGestureStateMachine
-            face_sm = FaceGestureStateMachine(settings.gestures.face)
+            face_sm = FaceGestureStateMachine(
+                settings.gestures.face,
+                head_roll=settings.gestures.head_tilt,
+            )
 
         j = settings.joystick
         left_joy = WristTiltJoystick(
@@ -269,6 +272,13 @@ class Pipeline:
         # Collect debug signals for the HUD.
         left_held = self.guard.left_held
         right_held = self.guard.right_held
+        # WASD now comes from the left-hand pinch gestures, not the (removed) tilt-joystick.
+        # Derive the HUD's movement-key set from the held left gestures' bindings.
+        wasd_held = frozenset(
+            key
+            for g in left_held
+            if (key := self.bindings.get(g)) in ("w", "a", "s", "d")
+        )
         left_sig = self.left_joystick_signal(left_lm) if left_lm is not None else None
         right_sig = self.right_joystick_signal(right_lm) if right_lm is not None else None
 
@@ -290,11 +300,11 @@ class Pipeline:
             events=events,
             left_output=left_out,
             right_output=right_out,
-            wasd_held=frozenset(self._wasd_held),
+            wasd_held=wasd_held,
             relocalized_hands=frozenset(relocalized_hands),
             left_gestures=left_held,
             right_gestures=right_held,
-            face_gestures=frozenset(d.name for d in getattr(self.face_sm, "_detectors", []) if getattr(d, "_is_active", False)) if self.face_sm else frozenset(),
+            face_gestures=self.face_sm.active_gestures() if self.face_sm else frozenset(),
             left_signal=left_sig,
             right_signal=right_sig,
             left_neutral=self.left_joystick.neutral,
@@ -346,24 +356,22 @@ class Pipeline:
     def _update_translation(
         self, landmarks: np.ndarray | None, dec: RecoveryDecision, now: float
     ) -> np.ndarray:
+        # WASD is no longer driven by the left tilt-joystick — it comes entirely from the
+        # left-hand pinch gestures (move_forward/back/left/right) through the gesture-event
+        # path, which the TrackingLossGuard releases on dropout. The joystick is kept only to
+        # produce a HUD signal; it never presses keys. ``_apply_wasd`` stays available so
+        # ``shutdown()`` keeps its fail-safe, but nothing populates ``_wasd_held`` anymore.
         if not dec.present or landmarks is None:
             self._left_miss += 1
-            # Release movement keys immediately (fail-safe), but only recenter the neutral
-            # after a *sustained* dropout so a one-frame blip doesn't snap it (recenter macro).
             if self._left_miss >= self.recenter_grace_frames:
                 self.left_joystick.reset_neutral()
-            self._apply_wasd(set())
             return self.left_joystick.zero()
         self._left_miss = 0
         if not dec.emit:
-            # Stabilizing on re-entry: feed coords so the neutral re-seeds, but emit nothing.
+            # Stabilizing on re-entry: feed coords so the HUD neutral re-seeds.
             self.left_joystick.update(self.left_joystick_signal(landmarks))
-            self._apply_wasd(set())
             return self.left_joystick.zero()
-        out = self.left_joystick.update(self.left_joystick_signal(landmarks))
-        target = self._wasd_targets(out)
-        self._apply_wasd(target)
-        return out
+        return self.left_joystick.update(self.left_joystick_signal(landmarks))
 
     def _update_look(
         self,
@@ -633,18 +641,20 @@ _STATUS_LABEL: dict[HandStatus, str] = {
     "absent": "NO HAND",
 }
 
-_LEFT_COMMANDS = (
-    ("Jump", "jump"),
-    ("Inventory", "inventory"),
+# The left hand now drives WASD only — shown in the WASD badge row, not a command column.
+# The first column shows face/head-roll gestures; the second shows the right hand.
+_FACE_COMMANDS = (
     ("Throw", "throw_item"),
-    ("Sneak", "sneak"),
-    ("Relocalize", "recenter"),
+    ("Inventory", "inventory"),
+    ("Swap", "swap_offhand"),
+    ("Hotbar +", "hotbar_next"),
+    ("Hotbar -", "hotbar_prev"),
 )
 _RIGHT_COMMANDS = (
     ("Attack", "attack"),
     ("Use", "use"),
-    ("Hotbar +", "hotbar_next"),
-    ("Hotbar -", "hotbar_prev"),
+    ("Jump", "jump"),
+    ("Sneak", "sneak"),
     ("Relocalize", "recenter"),
 )
 
@@ -738,12 +748,12 @@ def _draw_command_panel(
 
     _draw_command_column(
         frame,
-        "LEFT",
-        _LEFT_COMMANDS,
-        step.left_gestures,
+        "FACE",
+        _FACE_COMMANDS,
+        step.face_gestures,
         x + 12,
         y + 104,
-        flash="left" in flash_hands,
+        flash=False,
     )
     _draw_command_column(
         frame,

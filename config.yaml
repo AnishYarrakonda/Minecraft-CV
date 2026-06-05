@@ -19,34 +19,34 @@ tracking:
   dropout_flush_ms: 100.0
   stabilization_ms: 500.0
 gestures:
+  # Left hand = pinch-WASD movement. No conflict groups: two simultaneous pinches
+  # produce a diagonal (e.g. middle+index -> W+D).
   left_hand:
-    jump:
+    move_right:
       detector: pinch
       finger: index
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-    sneak:
+    move_forward:
+      detector: pinch
+      finger: middle
+      mode: hold
+      t_engage: 0.3
+      t_release: 0.45
+    move_left:
+      detector: pinch
+      finger: ring
+      mode: hold
+      t_engage: 0.3
+      t_release: 0.45
+    move_back:
       detector: pinch
       finger: pinky
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-    recenter:
-      detector: extension_combo
-      finger: index
-      mode: hold
-      t_engage: 1.15
-      t_release: 1.05
-      extension_fingers:
-      - index
-      - middle
-      curl_fingers:
-      - ring
-      - pinky
-      suppresses:
-      - jump
-      - sneak
+  # Right hand = clicks + jump/sneak. attack/use and jump/sneak are mutually exclusive.
   right_hand:
     attack:
       detector: pinch
@@ -62,20 +62,20 @@ gestures:
       t_engage: 0.3
       t_release: 0.45
       conflict_group: primary_click
-    hotbar_next:
+    jump:
       detector: pinch
       finger: ring
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-      conflict_group: hotbar_scroll
-    hotbar_prev:
+      conflict_group: jump_sneak
+    sneak:
       detector: pinch
       finger: pinky
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-      conflict_group: hotbar_scroll
+      conflict_group: jump_sneak
     recenter:
       detector: extension_combo
       finger: index
@@ -91,24 +91,34 @@ gestures:
       suppresses:
       - attack
       - use
-      - hotbar_next
-      - hotbar_prev
+      - jump
+      - sneak
   face:
     inventory:
-      blendshape: browInnerUp
+      blendshape: browInnerUp  # raise eyebrows -> E
       t_engage: 0.5
       t_release: 0.3
       engage_frames: 3
     throw_item:
-      blendshape: jawOpen
+      blendshape: jawOpen  # open mouth -> Q
       t_engage: 0.6
       t_release: 0.35
       engage_frames: 2
     swap_offhand:
-      blendshape: eyeBlinkLeft
+      blendshape: cheekPuff  # puff cheeks -> F
       t_engage: 0.5
       t_release: 0.3
       engage_frames: 3
+  # Head roll (ear-to-shoulder) -> hotbar scroll. Swap left/right gesture names if the
+  # mirrored feed inverts the direction.
+  head_tilt:
+    enabled: true
+    left_gesture: hotbar_next   # roll toward left shoulder  -> scroll up
+    right_gesture: hotbar_prev  # roll toward right shoulder -> scroll down
+    engage_deg: 12.0
+    release_deg: 7.0
+    engage_frames: 2
+    release_frames: 2
 
 face_tracking:
   enabled: true
@@ -134,20 +144,23 @@ input:
   scroll_repeat_rate_hz: 8
   key_repeat_guard_ms: 50
 bindings:
-  jump: space
-  sneak: shift
-  inventory: e
-  throw_item: q
-  swap_offhand: f
-
+  # Left-hand pinch-WASD.
+  move_forward: w
+  move_back: s
+  move_left: a
+  move_right: d
+  # Right-hand pinches.
   attack: mouse_left
   use: mouse_right
+  jump: space
+  sneak: shift
+  # Face gestures.
+  throw_item: q
+  inventory: e
+  swap_offhand: f
+  # Head-roll -> hotbar scroll.
   hotbar_next: scroll_up
   hotbar_prev: scroll_down
-  forward: w
-  back: s
-  left: a
-  right: d
 debug:
   overlay: false
   log_level: WARNING
