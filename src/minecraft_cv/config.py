@@ -339,10 +339,10 @@ def _default_face_gestures() -> dict[str, FaceGestureDetectorSettings]:
             engage_frames=2,
         ),
         "swap_offhand": FaceGestureDetectorSettings(
-            blendshape="cheekPuff",  # puff up cheeks -> F (swap offhand)
+            blendshape="eyeBlinkLeft",  # blink left eye -> F (swap offhand)
             t_engage=0.5,
             t_release=0.3,
-            engage_frames=3,
+            engage_frames=2,
         ),
     }
 

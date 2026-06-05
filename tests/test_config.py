@@ -68,7 +68,7 @@ def test_load_project_config_yaml() -> None:
         "sneak",
     )
     assert s.gestures.right_hand["attack"].finger == "index"
-    assert s.gestures.face["swap_offhand"].blendshape == "cheekPuff"
+    assert s.gestures.face["swap_offhand"].blendshape == "eyeBlinkLeft"
     # input_resolution list in YAML is coerced to a tuple.
     assert s.tracking.input_resolution == (256, 256)
 

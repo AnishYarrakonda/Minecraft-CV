@@ -105,10 +105,10 @@ gestures:
       t_release: 0.35
       engage_frames: 2
     swap_offhand:
-      blendshape: cheekPuff  # puff cheeks -> F
+      blendshape: eyeBlinkLeft  # blink left eye -> F
       t_engage: 0.5
       t_release: 0.3
-      engage_frames: 3
+      engage_frames: 2
   # Head roll (ear-to-shoulder) -> hotbar scroll. Swap left/right gesture names if the
   # mirrored feed inverts the direction.
   head_tilt:

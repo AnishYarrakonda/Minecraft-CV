@@ -86,10 +86,10 @@ def test_face_gesture_reset() -> None:
     assert events[0].action == KEY_UP
 
 
-def test_swap_offhand_default_uses_cheek_puff() -> None:
-    """F (swap offhand) is now triggered by cheekPuff, not eyeBlinkLeft."""
+def test_swap_offhand_default_uses_eye_blink_left() -> None:
+    """F (swap offhand) is triggered by a left-eye blink."""
     face = Settings().gestures.face
-    assert face["swap_offhand"].blendshape == "cheekPuff"
+    assert face["swap_offhand"].blendshape == "eyeBlinkLeft"
 
 
 def _names(events: list) -> set:
