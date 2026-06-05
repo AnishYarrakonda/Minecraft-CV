@@ -32,8 +32,8 @@ def test_defaults_construct_without_yaml() -> None:
         "move_left",
         "move_right",
     }
-    assert set(s.gestures.right_hand) == {"attack", "use", "jump", "sneak", "recenter"}
-    assert set(s.gestures.face) == {"inventory", "throw_item", "swap_offhand"}
+    assert set(s.gestures.right_hand) == {"attack", "use", "jump", "recenter"}
+    assert set(s.gestures.face) == {"inventory", "throw_item", "sneak", "swap_offhand"}
     assert s.gestures.head_tilt.enabled is True
 
     # Check new bindings exist
@@ -57,18 +57,13 @@ def test_load_project_config_yaml() -> None:
     # Left-hand WASD pinches carry no conflict group (diagonals must be possible).
     assert all(g.conflict_group is None for g in s.gestures.left_hand.values())
     assert s.gestures.right_hand["jump"].finger == "ring"
-    assert s.gestures.right_hand["jump"].conflict_group == "jump_sneak"
-    assert s.gestures.right_hand["sneak"].finger == "pinky"
-    assert s.gestures.right_hand["sneak"].conflict_group == "jump_sneak"
+    assert s.gestures.right_hand["jump"].conflict_group is None
+    assert "sneak" not in s.gestures.right_hand
     assert s.gestures.right_hand["recenter"].detector == "extension_combo"
-    assert s.gestures.right_hand["recenter"].suppresses == (
-        "attack",
-        "use",
-        "jump",
-        "sneak",
-    )
+    assert s.gestures.right_hand["recenter"].suppresses == ("attack", "use", "jump")
     assert s.gestures.right_hand["attack"].finger == "index"
-    assert s.gestures.face["swap_offhand"].blendshape == "eyeBlinkLeft"
+    assert s.gestures.face["sneak"].blendshape == "mouthPucker"
+    assert s.gestures.face["swap_offhand"].blendshape == "noseSneerLeft"
     # input_resolution list in YAML is coerced to a tuple.
     assert s.tracking.input_resolution == (256, 256)
 

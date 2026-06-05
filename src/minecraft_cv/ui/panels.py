@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QSlider,
 )
 
 from minecraft_cv.ui import theme
@@ -165,6 +166,8 @@ class _KeymapRow(QWidget):
 class KeymapPanel(QWidget):
     """Two cards listing every bound gesture, lit live as gestures fire."""
 
+    sensitivityChanged = Signal(float)
+
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         """Build the keymap from ``settings`` (bindings + gesture config)."""
         super().__init__(parent)
@@ -224,10 +227,30 @@ class KeymapPanel(QWidget):
         lay.addWidget(cards["left"])
         lay.addWidget(cards["right"])
         lay.addWidget(cards["face"])
+        
+        # Sensitivity slider
+        self._base_sensitivity = settings.joystick.right_sensitivity
+        sens_card = Card("MOUSE SENSITIVITY")
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setMinimum(1)
+        self.slider.setMaximum(100)
+        self.slider.setValue(10)
+        self.slider.valueChanged.connect(self._on_slider)
+        self.slider_label = QLabel("1.00x")
+        self.slider_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sens_card.add(self.slider)
+        sens_card.add(self.slider_label)
+        lay.addWidget(sens_card)
+
         lay.addStretch(1)
 
         scroll.setWidget(content)
         main_lay.addWidget(scroll)
+
+    def _on_slider(self, val: int) -> None:
+        mult = val / 10.0
+        self.slider_label.setText(f"{mult:.2f}x")
+        self.sensitivityChanged.emit(self._base_sensitivity * mult)
 
     def update_state(self, step: StepResult) -> None:
         """Light each row whose gesture is currently held."""

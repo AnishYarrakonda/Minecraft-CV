@@ -46,6 +46,11 @@ class PipelineWorker(QObject):
         self._recenter_pending = False
         self._live_pending: bool | None = None
         self._pending_emitter: InputEmitter | None = None
+        self._sensitivity_pending: float | None = None
+
+    def request_sensitivity(self, val: float) -> None:
+        """Ask to update the right joystick sensitivity (thread-safe)."""
+        self._sensitivity_pending = val
 
     def request_stop(self) -> None:
         """Ask the loop to finish and shut down (thread-safe)."""
@@ -84,6 +89,9 @@ class PipelineWorker(QObject):
                 if self._recenter_pending:
                     self._recenter_pending = False
                     processor.recenter()
+                if self._sensitivity_pending is not None:
+                    processor.pipeline.right_joystick.sensitivity_val = self._sensitivity_pending
+                    self._sensitivity_pending = None
                 if self._live_pending is not None:
                     want, self._live_pending = self._live_pending, None
                     emitter, self._pending_emitter = self._pending_emitter, None

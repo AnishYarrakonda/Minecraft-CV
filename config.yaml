@@ -68,14 +68,6 @@ gestures:
       mode: hold
       t_engage: 0.3
       t_release: 0.45
-      conflict_group: jump_sneak
-    sneak:
-      detector: pinch
-      finger: pinky
-      mode: hold
-      t_engage: 0.3
-      t_release: 0.45
-      conflict_group: jump_sneak
     recenter:
       detector: extension_combo
       finger: index
@@ -92,7 +84,6 @@ gestures:
       - attack
       - use
       - jump
-      - sneak
   face:
     inventory:
       blendshape: browInnerUp  # raise eyebrows -> E
@@ -104,8 +95,14 @@ gestures:
       t_engage: 0.6
       t_release: 0.35
       engage_frames: 2
+    sneak:
+      blendshape: cheekPuff  # puff cheeks -> Shift (hold while sneaking)
+      t_engage: 0.6
+      t_release: 0.35
+      engage_frames: 3
+      release_frames: 2
     swap_offhand:
-      blendshape: eyeBlinkLeft  # blink left eye -> F
+      blendshape: jawRight  # shift jaw right -> F
       t_engage: 0.5
       t_release: 0.3
       engage_frames: 2

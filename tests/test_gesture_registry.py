@@ -126,21 +126,15 @@ def test_left_pinky_pinch_holds_move_back(
     assert sm.held == set()
 
 
-def test_right_ring_pinky_pinch_jump_sneak_exclusive(
+def test_right_ring_pinch_jump(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
-    """Right ring -> jump, pinky -> sneak; they are mutually exclusive (jump_sneak group)."""
+    """Right ring -> jump; sneak has moved to a face gesture."""
     sm = GestureStateMachine("right", Settings().gestures.right_hand)
     ring = make_landmarks({"ring": 0.20})
     sm.update(ring)
     assert _names(sm.update(ring)) == {("jump", KEY_DOWN, "right")}
-
-    # Stronger (closer) pinky engages and wins the jump_sneak group; jump is released.
-    # Pinky needs its own engage debounce before it can take the group.
-    both = make_landmarks({"ring": 0.25, "pinky": 0.20})
-    for _ in range(3):
-        sm.update(both)
-    assert sm.held == {"sneak"}
+    assert "sneak" not in Settings().gestures.right_hand
 
 
 def test_extension_combo_peace_sign_triggers_recenter_thumb_ignored(

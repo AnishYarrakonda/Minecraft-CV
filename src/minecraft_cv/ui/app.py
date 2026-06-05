@@ -102,6 +102,7 @@ class MainWindow(QMainWindow):
         self._header.liveToggled.connect(self._on_live_toggled)
         self._header.calibrateClicked.connect(self._on_calibrate)
         self._header.pinToggled.connect(self._on_pin)
+        self._keymap.sensitivityChanged.connect(self._on_sensitivity_changed)
 
         self._start_session()
 
@@ -175,6 +176,10 @@ class MainWindow(QMainWindow):
     def _on_pin(self, pinned: bool) -> None:
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, pinned)
         self.show()  # re-show is required after changing window flags
+
+    def _on_sensitivity_changed(self, val: float) -> None:
+        if self._worker is not None:
+            self._worker.request_sensitivity(val)
 
     # --- signals from the worker --------------------------------------------
     def _on_frame(self, packet: FramePacket) -> None:

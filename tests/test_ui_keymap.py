@@ -14,13 +14,14 @@ def test_build_keymap_covers_all_bound_gestures() -> None:
     assert rows[("left", "move_forward")].key == "W"
     assert rows[("left", "move_forward")].finger == "Middle"
 
-    # Right-hand combat + jump/sneak.
+    # Right-hand combat + jump (sneak moved to face).
     assert rows[("right", "attack")].key == "LMB"
     assert rows[("right", "use")].key == "RMB"
     assert rows[("right", "jump")].key == "Space"
-    assert rows[("right", "sneak")].key == "Shift"
+    assert ("right", "sneak") not in rows
 
     # Face gestures + head-roll scroll specials.
+    assert rows[("face", "sneak")].key == "Shift"
     assert rows[("face", "throw_item")].key == "Q"
     assert rows[("face", "inventory")].key == "E"
     assert rows[("face", "swap_offhand")].key == "F"

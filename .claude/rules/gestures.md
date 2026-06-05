@@ -5,172 +5,122 @@ writing or reviewing anything in `gestures/`, `joystick/`, or `input/`.
 
 ## Input paradigm
 
-Two decoupled sub-systems run concurrently per frame:
+Three decoupled sub-systems run concurrently per frame:
 
-1. **Spatial joysticks (continuous)** — palm/wrist position → WASD + camera look.
-2. **Discrete gestures** — finger extensions (left hand) + thumb-to-finger pinches (right hand) → button events.
+1. **Pinch bitmask (left hand)** — thumb-to-finger pinches → WASD movement keys.
+2. **Pinch bitmask + cursor (right hand)** — thumb-to-finger pinches → combat buttons; index-MCP screen position → mouse-look deltas.
+3. **Face + head** — MediaPipe FaceLandmarker blendshapes → action keys; head-roll angle → hotbar scroll.
 
-They share the same landmark stream but are completely independent state machines.
-
----
-
-## Spatial joysticks
-
-Three joystick modes exist. **`palm_tilt` is the default** for gameplay; `palm_normal` and
-`wrist_rotation` are legacy fallbacks.
-
-### palm_tilt (default)
-
-Uses the **image-plane knuckle-tilt vector** as the joystick signal: the wrist→MCP-centroid
-direction (`palm_tilt_xy`, the `(x, y)` of `palm_vector`), normalized by hand span. Tilting a
-resting hand at the wrist swings the knuckles across the frame — a large, sign-stable 2D
-signal. A calibration step (`mcv calibrate --apply`) stores each hand's resting tilt in the
-`joystick.tilt` block; gameplay measures deviation from that neutral. It is translation-
-invariant (a difference of two landmarks), scale-invariant, and immune to finger curl/pinch
-(MCP-based). It deliberately replaces `palm_normal`, whose `(x, y)` projection was near-zero
-and noise-dominated in the resting range and collapsed left-tilt and right-tilt together.
-
-The same calibrated tilt signal also drives the **inventory cursor** as a tilt-to-absolute
-pointer (`Pipeline._update_cursor`): tilt deviation × per-axis sensitivity maps about
-screen-center, so a resting hand sits at center and a full comfortable tilt spans the screen.
-
-### palm_normal (legacy)
-
-Uses the **palm-plane normal vector** as the joystick signal. A calibration step stores each
-hand's resting normal in `joystick.palm_normal`; gameplay measures deviation from that neutral
-in `(x, y)` normal space. Translation-invariant, but unreliable for left/right tilt — kept only
-as a selectable fallback (`joystick.mode: palm_normal`).
-
-### wrist_rotation (legacy)
-
-Uses **wrist (landmark 0)** or **middle MCP (landmark 9)** XZ translation as the signal. Do NOT
-use the bounding-box center — pinching shifts it, corrupting the joystick vector. Requires
-`joystick.mode: wrist_rotation` in config.
-
-### Common behavior (both modes)
-
-```
-NEUTRAL: signal inside deadzone sphere  → output (0, 0)
-ACTIVE:  signal outside deadzone sphere → output = (signal − deadzone_edge) * sensitivity
-```
-
-- The deadzone is a **sphere** (not a box) so diagonal directions aren't biased.
-- Output is continuous at the sphere boundary — no step discontinuity.
-- Apply an **exponential acceleration curve** so large physical movements map to fast
-  in-game camera/movement without requiring the user to travel far. This directly
-  mitigates Gorilla Arm syndrome.
-- **Left hand** → WASD translation. **Right hand** → mouse look (camera rotation).
-- Mouse look output is filtered by a **One-Euro velocity-adaptive filter** (default) for
-  steady-at-rest + snappy-in-motion behavior. Configurable via `joystick.look_filter`.
-
-### Cardinal zones
-
-WASD output uses angular cardinal zones instead of independent axis checks:
-- Each axis direction has a pure zone of ±`cardinal_half_width` degrees (default 35°).
-- Between zones (20° gaps), both adjacent keys are pressed (diagonal movement).
-- This ensures the user can achieve pure W, A, S, or D without always getting diagonals.
-
-### Recenter / drift macro
-
-When both hands leave the frame and re-enter, the new entry coordinates become the
-fresh `(0,0,0)` neutral. This is the drift/recenter macro — no button press required.
+The `WristTiltJoystick` is still wired to the left hand but produces **HUD-only output** — it no longer presses WASD keys. WASD comes entirely from left-hand pinch events.
 
 ---
 
-## Handedness swap
+## Left hand: Pinch-bitmask WASD
 
-MediaPipe's handedness labels may be inverted when using a mirrored camera feed.
-The `tracking.swap_handedness` config flag (default: `true`) inverts the L/R labels
-so the user's physical left hand drives left-hand gestures/WASD and the physical
-right hand drives right-hand gestures/mouse-look.
-
----
-
-## Left hand: Extension-based gestures
-
-The default pose is a **relaxed closed fist**. Gestures are triggered by extending
-specific fingers. Extension is measured as a continuous ratio: `dist(wrist, tip) /
-dist(wrist, PIP)` — values > ~1.15 indicate extension; < ~1.0 indicate curled.
-
-### Gesture map
-
-| Gesture          | Finger Pattern         | Key/Event      | Mode  |
-|------------------|------------------------|----------------|-------|
-| Jump             | Thumb extended outward | `Space`        | Hold  |
-| Sneak            | Index extended only    | `Left Shift`   | Hold  |
-| Sprint           | Middle extended only   | `Ctrl`         | Hold  |
-| Inventory (E)    | Index + Middle (peace) | `E`            | Pulse |
-| Throw Item (Q)   | Ring extended only     | `Q`            | Pulse |
-| Switch Offhand   | Pinky extended only    | `F`            | Pulse |
-
-### Exclusion logic
-
-Single-finger "only" gestures include exclusion checks: if other non-required
-fingers are also extended above the engage threshold, the gesture is suppressed.
-This prevents a fully open hand from triggering every gesture simultaneously.
-
-The thumb is independent — `thumb_out` has no exclusion fingers.
-
-### Pulse gestures
-
-Inventory, Throw Item, and Switch Offhand use **pulse mode**: a single key tap
-(key_down + immediate key_up) on engage. No repeat while held, no key_up event
-on release. This is appropriate for toggle/one-shot actions.
-
----
-
-## Right hand: Pinch-bitmask
-
-Each finger's pinch state is an independent Schmitt trigger. All four can be active
-simultaneously (subject to anatomical constraints below).
+The default pose is an **open or relaxed hand**. WASD keys are driven by thumb-to-fingertip pinches, each on an independent Schmitt trigger. Two simultaneous pinches produce a diagonal (e.g. index + middle → W+D).
 
 ### Gesture map
 
 | Gesture          | Finger       | Key/Event      |
 |------------------|--------------|----------------|
-| Attack / Break   | Thumb→Index  | Left click     |
-| Use / Interact   | Thumb→Middle | Right click    |
-| Hotbar Next      | Thumb→Ring   | Scroll up      |
-| Hotbar Prev      | Thumb→Pinky  | Scroll down    |
+| Move right       | Thumb→Index  | `D`            |
+| Move forward     | Thumb→Middle | `W`            |
+| Move left        | Thumb→Ring   | `A`            |
+| Move back        | Thumb→Pinky  | `S`            |
 
-### Schmitt trigger (hysteresis gate)
+All four are `hold` mode: key held while pinch is engaged, released when the distance rises above `T_release`.
 
-The most important correctness invariant in the project. Each pinch gesture has two
-thresholds operating on the **normalized** thumb-to-fingertip distance (divided by
-wrist→middle-MCP span):
+No conflict groups on the left hand — diagonal movement is intentional.
+
+---
+
+## Right hand: Pinch-bitmask + cursor
+
+### Gesture map
+
+| Gesture           | Detector          | Key/Event      |
+|-------------------|-------------------|----------------|
+| Attack / Break    | Thumb→Index       | Left click     |
+| Use / Interact    | Thumb→Middle      | Right click    |
+| Jump              | Thumb→Ring        | Space          |
+| Recenter (clutch) | Peace sign¹       | (no key)       |
+
+¹ Peace sign = `extension_combo`: index + middle extended above `T_engage`, ring + pinky curled below `T_release`. While held, it suppresses attack, use, and jump; freezes mouse output; and seeds the cursor anchor at the current index-MCP position (mouse-lifted clutch). On release, look resumes from the new anchor — no camera snap.
+
+**Conflict group `primary_click`**: Attack and Use are mutually exclusive. The stronger pinch wins; the weaker is force-released. This reflects Minecraft's game-logic constraint.
+
+### Mouse-look (cursor signal)
+
+Camera look uses the **index-MCP position** (landmark 5) tracked frame-to-frame. The right joystick is a `ScreenJoystick` with a fixed neutral anchor at `(0.75, 0.5)` by default. The per-frame delta is:
 
 ```
-STATE: RELEASED
-  if distance < T_engage  → KEY_DOWN(action); STATE = HOLDING
-
-STATE: HOLDING
-  if distance > T_release → KEY_UP(action);   STATE = RELEASED
+mouse_delta = (current_index_mcp - prev_index_mcp) * right_sensitivity
 ```
 
-**`T_release` must be strictly greater than `T_engage`.** For extension gestures,
-the invariant is inverted: **`T_engage` must be strictly greater than `T_release`.**
+filtered by a **One-Euro velocity-adaptive filter** (`joystick.look_filter: one_euro`). A cursor re-seed (via peace-sign or on re-entry) sets `_right_cursor_prev` to the current position without emitting movement.
 
-### Hotbar scroll — momentary pulse with repeat
+---
 
-Ring and pinky anatomical coupling means Hotbar Next/Prev use a **repeat-rate model**:
-- Engage → emit one scroll tick.
-- Hold the pinch → re-emit at `scroll_repeat_rate_hz` (default 8 Hz).
-- Release → stop.
+## Face gestures
+
+MediaPipe FaceLandmarker provides 52 blendshape scores per frame. Each face gesture has a Schmitt-trigger state machine with frame-count debounce.
+
+### Blendshape gesture map
+
+| Gesture       | Blendshape      | Key/Event    | Mode  |
+|---------------|-----------------|--------------|-------|
+| Inventory     | `browInnerUp`   | `E`          | Pulse |
+| Throw Item    | `jawOpen`       | `Q`          | Pulse |
+| Sneak         | `mouthPucker`   | `Left Shift` | Hold  |
+| Swap Offhand  | `noseSneerLeft` | `F`          | Pulse |
+
+Face gesture semantics: **`t_engage > t_release`** (higher score = more engaged). `engage_frames` consecutive frames above `t_engage` fires KEY_DOWN; `release_frames` consecutive frames below `t_release` fires KEY_UP. Debounce absorbs single-frame noise.
+
+---
+
+## Head-tilt: hotbar scroll
+
+The head-roll angle is derived from the outer eye-corner line (FaceMesh landmarks 33 → 263). Roll is `atan2(dy, dx)` of that vector in normalized image space.
+
+Two mutually-exclusive Schmitt states share the same angle signal:
+
+```
+roll > +engage_deg  →  hotbar_next (scroll up)
+roll < -engage_deg  →  hotbar_prev (scroll down)
+```
+
+Each releases when the angle returns inside `±release_deg`. `engage_deg > release_deg` strictly. A held tilt re-emits scroll ticks at `scroll_repeat_rate_hz`.
+
+---
+
+## Schmitt trigger (hysteresis gate)
+
+Two sign conventions used across the project:
+
+**Lower-is-engaged** (pinch detectors):
+- `T_release > T_engage` strictly.
+- Signal = normalized thumb-to-fingertip distance; engage when it drops below `T_engage`.
+
+**Higher-is-engaged** (extension_combo, face blendshapes):
+- `T_engage > T_release` strictly.
+- Signal = extension ratio or blendshape score; engage when it rises above `T_engage`.
+
+Equal or inverted thresholds reintroduce the chatter the gate exists to prevent. A config validator (`@model_validator`) and a test both assert the correct ordering for all configured gestures.
 
 ---
 
 ## Concurrency model
 
-| Action combo       | Feasibility | Reasoning |
-|--------------------|-------------|-----------|
-| Move + Look        | Seamless    | Independent hands |
-| Move + Jump        | Seamless    | LH translation + LH thumb out |
-| Jump + Attack      | Seamless    | LH thumb + RH index — different hands |
-| Move+Jump+Attack   | Seamless    | All independent |
-| Jump + Sneak       | Possible    | LH thumb + LH index — biomechanically feasible |
-| Sneak + Sprint     | Blocked     | Mutually exclusive by design |
-| Attack + Use       | Blocked     | RH index + RH middle — usually a game-logic conflict |
-| Move + Inventory   | Works       | Peace sign + WASD still tracks wrist position |
+| Action combo           | Feasibility | Reasoning |
+|------------------------|-------------|-----------|
+| Move + Look            | Seamless    | Independent hands |
+| Move + Jump            | Seamless    | LH WASD pinch + RH ring pinch |
+| Move + Attack          | Seamless    | LH pinch + RH pinch — different hands |
+| Move + Jump + Attack   | Seamless    | All independent |
+| Attack + Use           | Blocked     | Conflict group `primary_click` (game-logic) |
+| Recenter + Attack      | Blocked     | `recenter` suppresses `attack`, `use`, `jump` |
+| Sneak (face) + WASD    | Seamless    | Face stream is fully independent |
+| Head tilt + anything   | Seamless    | Face/head stream is fully independent |
 
 ---
 
@@ -178,19 +128,18 @@ Ring and pinky anatomical coupling means Hotbar Next/Prev use a **repeat-rate mo
 
 | Failure | Mitigation |
 |---------|------------|
-| Hand occlusion (fingers hide thumb) | Mount camera at ~45° looking down; enforce physical operating space |
-| Drifting neutral (user shifts in chair) | Recenter macro on re-entry; dynamic deadzones in V2 |
-| Pinky pinch drags ring finger | Hotbar = momentary pulse + repeat rate, not hold-to-repeat |
-| Jitter at engage threshold | Widen Schmitt band; add One-Euro smoothing upstream |
-| Tracking lost mid-gesture | State machines must fail-safe: release all held keys on dropout |
-| False positive from open hand | Exclusion logic: single-finger gestures rejected if others also extended |
+| Hand occlusion mid-gesture | `TrackingLossGuard` releases all held keys on dropout |
+| Camera drift | Peace-sign recenter reseeds cursor anchor without moving camera |
+| Pinch jitter at threshold | Schmitt hysteresis band swallows sub-threshold oscillation |
+| Face blendshape noise spike | Frame-count debounce (`engage_frames`) absorbs single-frame noise |
+| Head tracking lost | `HeadRollDetector.reset()` force-releases held scroll direction |
+| Stuck key on crash | `Pipeline.shutdown()` releases all held keys + WASD + emitter |
 
 ### Tracking loss safety
 
 If MediaPipe returns no hand for a given side:
-1. Emit KEY_UP for any currently-held gesture on that hand.
+1. Emit KEY_UP for every currently-held gesture via `TrackingLossGuard`.
 2. Zero the joystick output for that hand.
-3. Do NOT leave any key stuck down.
+3. After `dropout_flush_ms`, hard-flush: reset the cursor anchor and look filter.
 
-This is a hard requirement. A crash or dropout must never leave `Space` held (bunny
-hopping forever) or `Left Shift` held (sneak-locked).
+A crash or dropout must never leave `Space` held (bunny hopping) or a click stuck down. This is a hard requirement enforced in tests.

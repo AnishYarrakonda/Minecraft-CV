@@ -15,14 +15,17 @@ detected hand, each as an `(x, y, z)` coordinate:
 
 These 21 landmarks are the raw material for everything else:
 
-- **Spatial joysticks:** wrist (landmark 0) or middle MCP (landmark 9) centroid
-  → `(Δx, Δy)` relative to a stored neutral position.
 - **Pinch-bitmask:** pairwise distances between thumb tip (4) and each fingertip
-  (8, 12, 16, 20), normalized by hand scale.
+  (8, 12, 16, 20), normalized by hand scale — drives WASD (left hand) and combat (right hand).
+- **Cursor look:** index-MCP position (landmark 5) tracked frame-to-frame → mouse-look deltas.
+- **Extension ratios:** `dist(wrist, tip) / dist(wrist, PIP)` — used by `extension_combo`
+  detectors (e.g. peace-sign recenter).
 
 MediaPipe runs on CPU only (no MPS/CUDA); it is already fast enough at its native
 resolution. Do not attempt to move it to MPS — it will error. Any PyTorch/YOLO
 tracker lives behind the same `HandTracker` ABC as a swappable alternative backend.
+
+**MediaPipe FaceLandmarker** (`face_tracker.py`) runs alongside hand tracking on the same `FrameProcessor` thread. It produces `FaceResult` with `blendshapes` (dict of 52 score floats) and `landmarks` (478-point array). These feed `FaceGestureStateMachine` for blendshape actions (raise eyebrows, open mouth, etc.) and `HeadRollDetector` for head-tilt hotbar scroll. The model file lives at `models/face_landmarker.task`; `face_tracking.enabled: false` in config disables it entirely (no-op `FaceResult` fed to the pipeline).
 
 ## OpenCV (`cv2`) — frame ingestion, preprocessing, and debug overlay ONLY
 
@@ -108,37 +111,49 @@ backend selection, device. No magic numbers in gesture or joystick code.
 ```
 src/minecraft_cv/
 ├── capture/        # VideoCapture wrapper, frame source interface, buffer thread
-│   ├── source.py       # AVFoundationSource (cv2.VideoCapture + explicit FPS/resolution)
+│   ├── source.py       # AVFoundationSource + ClipSource (cv2.VideoCapture)
 │   └── buffer.py       # single-slot FrameBuffer (drop stale, keep newest)
-├── tracking/       # HandTracker ABC; mediapipe_backend.py; optional yolo_backend.py
+├── tracking/       # tracker ABCs and backends
 │   ├── tracker.py      # HandTracker ABC + HandResult dataclass
-│   └── mediapipe_backend.py
+│   ├── mediapipe_backend.py  # MediaPipe Hands implementation
+│   └── face_tracker.py # MediaPipe FaceLandmarker + FaceResult (blendshapes + landmarks)
 ├── gestures/       # all discrete gesture state machines
 │   ├── schmitt.py      # raw Schmitt-trigger (threshold hysteresis)
-│   ├── pinch.py        # right-hand pinch-bitmask state machine
-│   ├── extension.py    # left-hand finger-extension state machine
-│   ├── finger_state.py # extension ratio helpers
-│   ├── registry.py     # GestureStateMachine (config-driven detector map)
-│   ├── inventory.py    # two-hand open-palm inventory-mode toggle
+│   ├── pinch.py        # normalized thumb-to-fingertip distance helpers
+│   ├── extension.py    # finger-extension ratio helpers
+│   ├── finger_state.py # FingerState dataclass + finger_extensions()
+│   ├── registry.py     # GestureStateMachine (config-driven detector map, both hands)
+│   ├── face_gestures.py # FaceGestureStateMachine + HeadRollDetector
 │   └── safety.py       # TrackingLossGuard (key release on hand dropout)
-├── joystick/       # spatial joystick math
-│   ├── deadzone.py     # sphere deadzone + cardinal zones + accel curve
-│   ├── palm_normal.py  # default mode: calibrated palm-normal joystick
-│   ├── wrist_rotation.py  # legacy mode: wrist XZ translation joystick
-│   ├── sprint_velocity.py # optional depth-velocity Sprint trigger
+├── joystick/       # joystick math and filters
+│   ├── screen.py       # ScreenJoystick (absolute screen-space, right hand cursor look)
+│   ├── wrist_tilt.py   # WristTiltJoystick (wrist→MCP tilt vector, HUD signal only)
+│   ├── steering.py     # octant_keys() — 8-slice WASD from joystick output
+│   ├── sprint_velocity.py  # optional depth-velocity sprint trigger
 │   └── one_euro.py     # One-Euro velocity-adaptive filter for mouse look
 ├── input/          # InputEmitter ABC, NullEmitter, MacInputEmitter (pynput+Quartz)
 │   ├── emitter.py
 │   └── mac_emitter.py
-├── calibration.py  # auto-calibration logic (palm-normal neutral + pinch thresholds)
+├── ui/             # PySide6 desktop app (mcv ui / mcv overlay)
+│   ├── app.py          # MainWindow + run_app() entrypoint
+│   ├── overlay.py      # compact always-on-top overlay (run_overlay())
+│   ├── worker.py       # PipelineWorker (pipeline on background thread, signals to Qt)
+│   ├── camera_view.py  # live camera feed widget
+│   ├── panels.py       # HeaderBar (Go Live / Calibrate), KeymapPanel (gesture HUD)
+│   ├── keymap.py       # per-binding key indicator widgets
+│   ├── skeleton.py     # hand-skeleton overlay on the camera view
+│   ├── widgets.py      # shared reusable Qt widgets
+│   └── theme.py        # zinc dark-mode palette + apply_theme()
+├── runtime.py      # FrameProcessor: camera/clip loop + face tracker on shared thread
 ├── recovery.py     # per-hand tracking-loss recovery state machine
-├── pipeline.py     # wires capture → tracking → gestures → joystick → input
+├── pipeline.py     # Pipeline: gestures + joystick → InputEmitter; run_pipeline()
 └── config.py       # pydantic Settings model (all tunable values via config.yaml)
 
-cli.py              # CLI entrypoints: mcv run/calibrate/analyze/bench/doctor/gestures
-                    # (installed as mcv, mcv-run, mcv-calibrate, mcv-analyze, mcv-bench)
+cli.py              # Unified mcv entrypoint + sub-commands (ui, overlay, run, analyze,
+                    # bench, doctor, gestures)
 tests/              # mirrors src/ structure; gesture SM tests are pure/deterministic
 data/               # clips + annotations (git-ignored; large files go in data/clips/)
+models/             # MediaPipe model files (face_landmarker.task)
 ```
 
 ## Code style

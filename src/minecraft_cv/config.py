@@ -281,14 +281,6 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             finger="ring",
             t_engage=0.30,
             t_release=0.45,
-            conflict_group="jump_sneak",
-        ),
-        "sneak": GestureDetectorSettings(
-            detector="pinch",
-            finger="pinky",
-            t_engage=0.30,
-            t_release=0.45,
-            conflict_group="jump_sneak",
         ),
         "recenter": GestureDetectorSettings(
             detector="extension_combo",
@@ -298,7 +290,7 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             mode="hold",
             extension_fingers=("index", "middle"),
             curl_fingers=("ring", "pinky"),
-            suppresses=("attack", "use", "jump", "sneak"),
+            suppresses=("attack", "use", "jump"),
         ),
     }
 
@@ -338,8 +330,15 @@ def _default_face_gestures() -> dict[str, FaceGestureDetectorSettings]:
             t_release=0.35,
             engage_frames=2,
         ),
+        "sneak": FaceGestureDetectorSettings(
+            blendshape="cheekPuff",  # puff cheeks -> Shift (hold while sneaking)
+            t_engage=0.6,
+            t_release=0.35,
+            engage_frames=3,
+            release_frames=2,
+        ),
         "swap_offhand": FaceGestureDetectorSettings(
-            blendshape="eyeBlinkLeft",  # blink left eye -> F (swap offhand)
+            blendshape="jawRight",  # shift jaw right -> F
             t_engage=0.5,
             t_release=0.3,
             engage_frames=2,

@@ -10,14 +10,17 @@ gestures to game input, and emits OS-level events via pynput / Quartz CGEvent.
 # Setup (if needed; .venv already exists)
 source .venv/bin/activate
 
-# Dry run with camera and debug overlay
+# Desktop app (recommended — Go Live toggle, Calibrate button, live HUD)
+.venv/bin/python -m minecraft_cv.cli ui
+
+# Compact always-on-top overlay (for use alongside Minecraft)
+.venv/bin/python -m minecraft_cv.cli overlay --live
+
+# Dry run with camera and debug overlay (headless, no UI)
 .venv/bin/python -m minecraft_cv.cli run --no-input --debug-overlay
 
-# Live mode (emits real OS input)
+# Live mode headless (emits real OS input)
 .venv/bin/python -m minecraft_cv.cli run --input --debug-overlay
-
-# Calibrate spatial joystick
-.venv/bin/python -m minecraft_cv.cli calibrate --apply
 
 # Offline clip analysis
 .venv/bin/python -m minecraft_cv.cli analyze data/clips/foo.mp4
@@ -30,7 +33,7 @@ source .venv/bin/activate
 ```
 
 **For development, always use one of these patterns:**
-- `--no-input --debug-overlay` with live camera to iterate safely (no real input emitted)
+- `mcv ui` or `--no-input --debug-overlay` with live camera to iterate safely (no real input emitted)
 - `--clip data/clips/foo.mp4 --no-input --debug-overlay` for deterministic testing against recorded footage
 
 Never debug gesture logic against live Minecraft input; it's non-deterministic and will fling your character.

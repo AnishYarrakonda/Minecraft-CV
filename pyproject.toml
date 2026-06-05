@@ -30,11 +30,6 @@ test-min = ["numpy>=1.25", "pydantic-settings>=2", "PyYAML>=6", "pytest>=7"]
 
 [project.scripts]
 mcv = "minecraft_cv.cli:main"
-mcv-ui = "minecraft_cv.cli:main_ui"
-mcv-run = "minecraft_cv.cli:main_run"
-mcv-calibrate = "minecraft_cv.cli:main_calibrate"
-mcv-analyze = "minecraft_cv.cli:main_analyze"
-mcv-bench = "minecraft_cv.cli:main_bench"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
