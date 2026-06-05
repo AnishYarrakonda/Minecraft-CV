@@ -32,8 +32,8 @@ def test_defaults_construct_without_yaml() -> None:
         "move_left",
         "move_right",
     }
-    assert set(s.gestures.right_hand) == {"attack", "use", "jump", "recenter", "swap_offhand"}
-    assert set(s.gestures.face) == {"inventory", "throw_item"}
+    assert set(s.gestures.right_hand) == {"attack", "use", "inventory", "recenter", "swap_offhand"}
+    assert set(s.gestures.face) == {"jump", "throw_item"}
     assert s.gestures.head_tilt.enabled is True
 
     # Check new bindings exist
@@ -56,11 +56,11 @@ def test_load_project_config_yaml() -> None:
     assert s.gestures.left_hand["move_back"].finger == "pinky"
     # Left-hand WASD pinches carry no conflict group (diagonals must be possible).
     assert all(g.conflict_group is None for g in s.gestures.left_hand.values())
-    assert s.gestures.right_hand["jump"].finger == "ring"
-    assert s.gestures.right_hand["jump"].conflict_group is None
+    assert s.gestures.right_hand["inventory"].finger == "ring"
+    assert s.gestures.right_hand["inventory"].conflict_group is None
     assert "sneak" not in s.gestures.right_hand
     assert s.gestures.right_hand["recenter"].detector == "extension_combo"
-    assert s.gestures.right_hand["recenter"].suppresses == ("attack", "use", "jump", "swap_offhand")
+    assert s.gestures.right_hand["recenter"].suppresses == ("attack", "use", "inventory", "swap_offhand")
     assert s.gestures.right_hand["attack"].finger == "index"
     assert s.gestures.head_pitch.gesture == "sneak"
     assert s.gestures.right_hand["swap_offhand"].finger == "pinky"
@@ -113,7 +113,7 @@ def test_bad_threshold_in_yaml_raises(tmp_path: Path) -> None:
         "gestures": {
             "left_hand": {
                 # Detector gestures require release > engage; this is backward
-                "jump": {
+                "inventory": {
                     "detector": "pinch",
                     "finger": "index",
                     "t_engage": 0.45,

@@ -343,9 +343,9 @@ class Pipeline:
 
     def _repeat_scroll(self, now: float) -> None:
         """Re-emit scroll ticks for held hotbar gestures at the configured repeat rate."""
-        if not self._last_scroll_time:
+        if not self._last_scroll_time or self.scroll_repeat_rate_hz <= 0:
             return
-        interval = 1.0 / self.scroll_repeat_rate_hz if self.scroll_repeat_rate_hz > 0 else 1.0
+        interval = 1.0 / self.scroll_repeat_rate_hz
         for gesture, last_time in list(self._last_scroll_time.items()):
             if (now - last_time) >= interval:
                 binding = self.bindings.get(gesture)

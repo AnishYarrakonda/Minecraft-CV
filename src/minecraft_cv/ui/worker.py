@@ -47,10 +47,15 @@ class PipelineWorker(QObject):
         self._live_pending: bool | None = None
         self._pending_emitter: InputEmitter | None = None
         self._sensitivity_pending: float | None = None
+        self._sneak_sensitivity_pending: int | None = None
 
     def request_sensitivity(self, val: float) -> None:
         """Ask to update the right joystick sensitivity (thread-safe)."""
         self._sensitivity_pending = val
+
+    def request_sneak_sensitivity(self, val: int) -> None:
+        """Ask to update the head pitch sneak sensitivity (thread-safe)."""
+        self._sneak_sensitivity_pending = val
 
     def request_stop(self) -> None:
         """Ask the loop to finish and shut down (thread-safe)."""
@@ -92,6 +97,15 @@ class PipelineWorker(QObject):
                 if self._sensitivity_pending is not None:
                     processor.pipeline.right_joystick.sensitivity_val = self._sensitivity_pending
                     self._sensitivity_pending = None
+                if self._sneak_sensitivity_pending is not None:
+                    if processor.pipeline.face_sm and processor.pipeline.face_sm._head_pitch:
+                        # Map slider 1..100 to engage_ratio 0.50..0.99
+                        val = self._sneak_sensitivity_pending
+                        engage = 0.50 + (val / 100.0) * 0.49
+                        release = min(engage + 0.05, 0.999)
+                        processor.pipeline.face_sm._head_pitch.engage_ratio = engage
+                        processor.pipeline.face_sm._head_pitch.release_ratio = release
+                    self._sneak_sensitivity_pending = None
                 if self._live_pending is not None:
                     want, self._live_pending = self._live_pending, None
                     emitter, self._pending_emitter = self._pending_emitter, None

@@ -126,14 +126,14 @@ def test_left_pinky_pinch_holds_move_back(
     assert sm.held == set()
 
 
-def test_right_ring_pinch_jump(
+def test_right_ring_pinch_inventory(
     make_landmarks: Callable[..., np.ndarray],
 ) -> None:
-    """Right ring -> jump; sneak has moved to a face gesture."""
+    """Right ring -> inventory; sneak has moved to a face gesture."""
     sm = GestureStateMachine("right", Settings().gestures.right_hand)
     ring = make_landmarks({"ring": 0.20})
     sm.update(ring)
-    assert _names(sm.update(ring)) == {("jump", KEY_DOWN, "right")}
+    assert _names(sm.update(ring)) == {("inventory", KEY_DOWN, "right")}
     assert "sneak" not in Settings().gestures.right_hand
 
 

@@ -218,14 +218,28 @@ class HeadPitchDetector:
         self._is_active = False
         self._consecutive_above = 0
         self._consecutive_below = 0
+        self._baseline_ratio: float | None = None
         
     @property
     def name(self) -> str:
         return self.gesture
         
     def update(self, result: FaceResult) -> list[GestureEvent]:
-        ratio = _head_pitch_ratio(result)
+        raw_ratio = _head_pitch_ratio(result)
         events: list[GestureEvent] = []
+        
+        if raw_ratio is None:
+            return events
+            
+        if self._baseline_ratio is None:
+            self._baseline_ratio = raw_ratio
+        elif not self._is_active:
+            if raw_ratio > self._baseline_ratio:
+                self._baseline_ratio = self._baseline_ratio * 0.5 + raw_ratio * 0.5
+            else:
+                self._baseline_ratio = self._baseline_ratio * 0.99 + raw_ratio * 0.01
+                
+        ratio = raw_ratio / self._baseline_ratio
         
         if self._is_active:
             if ratio is None or ratio >= self.release_ratio:

@@ -62,7 +62,7 @@ gestures:
       t_engage: 0.3
       t_release: 0.45
       conflict_group: primary_click
-    jump:
+    inventory:
       detector: pinch
       finger: ring
       mode: hold
@@ -83,7 +83,7 @@ gestures:
       suppresses:
       - attack
       - use
-      - jump
+      - inventory
       - swap_offhand
     swap_offhand:
       detector: pinch
@@ -92,8 +92,8 @@ gestures:
       t_engage: 0.3
       t_release: 0.45
   face:
-    inventory:
-      blendshape: browInnerUp  # raise eyebrows -> E
+    jump:
+      blendshape: browInnerUp  # raise eyebrows -> space
       t_engage: 0.5
       t_release: 0.3
       engage_frames: 3
@@ -117,7 +117,7 @@ gestures:
     enabled: true
     gesture: sneak
     engage_ratio: 0.85
-    release_ratio: 0.95
+    release_ratio: 0.92
     engage_frames: 3
     release_frames: 2
 
@@ -142,7 +142,7 @@ joystick:
 input:
   enabled: false
   mouse_delta_scale: 58.0
-  scroll_repeat_rate_hz: 8
+  scroll_repeat_rate_hz: 0
   key_repeat_guard_ms: 50
 bindings:
   # Left-hand pinch-WASD.
@@ -153,11 +153,11 @@ bindings:
   # Right-hand pinches.
   attack: mouse_left
   use: mouse_right
-  jump: space
+  inventory: e
   sneak: shift
   # Face gestures.
   throw_item: q
-  inventory: e
+  jump: space
   swap_offhand: f
   # Head-roll -> hotbar scroll.
   hotbar_next: scroll_up

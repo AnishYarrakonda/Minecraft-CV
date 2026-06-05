@@ -276,7 +276,7 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             t_release=0.45,
             conflict_group="primary_click",
         ),
-        "jump": GestureDetectorSettings(
+        "inventory": GestureDetectorSettings(
             detector="pinch",
             finger="ring",
             t_engage=0.30,
@@ -290,7 +290,7 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             mode="hold",
             extension_fingers=("index", "middle"),
             curl_fingers=("ring", "pinky"),
-            suppresses=("attack", "use", "jump", "swap_offhand"),
+            suppresses=("attack", "use", "inventory", "swap_offhand"),
         ),
         "swap_offhand": GestureDetectorSettings(
             detector="pinch",
@@ -324,7 +324,7 @@ class FaceGestureDetectorSettings(BaseModel):
 
 def _default_face_gestures() -> dict[str, FaceGestureDetectorSettings]:
     return {
-        "inventory": FaceGestureDetectorSettings(
+        "jump": FaceGestureDetectorSettings(
             blendshape="browInnerUp",
             t_engage=0.5,
             t_release=0.3,
@@ -380,7 +380,7 @@ class HeadPitchGestureSettings(BaseModel):
     enabled: bool = True
     gesture: str = "sneak"
     engage_ratio: float = Field(default=0.85, gt=0.0)
-    release_ratio: float = Field(default=0.95, gt=0.0)
+    release_ratio: float = Field(default=0.92, gt=0.0)
     engage_frames: int = Field(default=3, ge=1)
     release_frames: int = Field(default=2, ge=1)
 
@@ -446,7 +446,7 @@ class InputSettings(BaseModel):
     enabled: bool = False
     mouse_delta_scale: float = Field(default=58.0, gt=0.0)
     """Multiplier from normalized thumb movement to relative mouse pixels."""
-    scroll_repeat_rate_hz: float = Field(default=8.0, gt=0.0)
+    scroll_repeat_rate_hz: float = Field(default=0.0, ge=0.0)
     key_repeat_guard_ms: float = Field(default=50.0, ge=0.0)
 
 

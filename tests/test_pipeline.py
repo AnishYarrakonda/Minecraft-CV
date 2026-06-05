@@ -72,7 +72,7 @@ def test_left_pinch_drives_wasd(
     assert res.wasd_held == frozenset({"d"})
 
 
-def test_right_ring_pinch_jumps(
+def test_right_ring_pinch_inventory(
     null_emitter: NullEmitter,
     make_screen_landmarks: Callable[..., np.ndarray],
     make_hand_result: Callable[..., HandResult],
@@ -84,7 +84,7 @@ def test_right_ring_pinch_jumps(
     lm = make_screen_landmarks(distances={"ring": 0.01})
     pipe.step([make_hand_result(lm, "Left")])
     pipe.step([make_hand_result(lm, "Left")])
-    assert ("key_down", "space") in null_emitter.log
+    assert ("key_down", "e") in null_emitter.log
 
 
 def test_left_pinches_are_held_not_tapped(

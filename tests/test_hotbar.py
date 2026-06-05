@@ -57,7 +57,9 @@ def test_head_upright_does_not_scroll(null_emitter: NullEmitter) -> None:
 
 def test_held_head_roll_repeats_scroll(null_emitter: NullEmitter) -> None:
     """A sustained tilt re-emits scroll ticks via the repeat-rate path."""
-    pipe = Pipeline.from_settings(make_screen_settings(), emitter=null_emitter)
+    settings = make_screen_settings()
+    settings.input.scroll_repeat_rate_hz = 8.0
+    pipe = Pipeline.from_settings(settings, emitter=null_emitter)
     now = {"t": 0.0}
     pipe._clock = lambda: now["t"]  # type: ignore[method-assign]
     face = _face_with_roll(20.0)

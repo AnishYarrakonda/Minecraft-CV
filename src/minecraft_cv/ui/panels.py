@@ -167,6 +167,7 @@ class KeymapPanel(QWidget):
     """Two cards listing every bound gesture, lit live as gestures fire."""
 
     sensitivityChanged = Signal(float)
+    sneakSensitivityChanged = Signal(int)
 
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         """Build the keymap from ``settings`` (bindings + gesture config)."""
@@ -240,6 +241,26 @@ class KeymapPanel(QWidget):
         self.slider_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sens_card.add(self.slider)
         sens_card.add(self.slider_label)
+        
+        # Sneak Sensitivity slider
+        self.sneak_slider = QSlider(Qt.Orientation.Horizontal)
+        self.sneak_slider.setMinimum(1)
+        self.sneak_slider.setMaximum(100)
+        
+        # Calculate initial value from config: engage = 0.50 + (val/100) * 0.49
+        # => val = (engage - 0.50) / 0.49 * 100
+        initial_engage = settings.gestures.head_pitch.engage_ratio if settings.gestures.head_pitch else 0.85
+        initial_val = int(round((initial_engage - 0.50) / 0.49 * 100.0))
+        initial_val = max(1, min(100, initial_val))
+        
+        self.sneak_slider.setValue(initial_val)
+        self.sneak_slider.valueChanged.connect(self._on_sneak_slider)
+        self.sneak_slider_label = QLabel(f"{initial_val}%")
+        self.sneak_slider_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sens_card.add(QLabel("SNEAK SENSITIVITY"))
+        sens_card.add(self.sneak_slider)
+        sens_card.add(self.sneak_slider_label)
+        
         lay.addWidget(sens_card)
 
         lay.addStretch(1)
@@ -251,6 +272,10 @@ class KeymapPanel(QWidget):
         mult = val / 10.0
         self.slider_label.setText(f"{mult:.2f}x")
         self.sensitivityChanged.emit(self._base_sensitivity * mult)
+
+    def _on_sneak_slider(self, val: int) -> None:
+        self.sneak_slider_label.setText(f"{val}%")
+        self.sneakSensitivityChanged.emit(val)
 
     def update_state(self, step: StepResult) -> None:
         """Light each row whose gesture is currently held."""
