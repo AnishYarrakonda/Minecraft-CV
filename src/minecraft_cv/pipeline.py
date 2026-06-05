@@ -71,6 +71,7 @@ class StepResult:
 
     right_output: np.ndarray = field(default_factory=lambda: np.zeros(2))
     inventory_active: bool = False
+    wasd_held: frozenset[str] = field(default_factory=frozenset)
 
 
 class Pipeline:
