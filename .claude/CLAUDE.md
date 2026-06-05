@@ -45,8 +45,33 @@ Never debug gesture logic against live Minecraft input; it's non-deterministic a
 3. CPU fallback always works. MPS is an accelerator, never a hard dependency.
 4. `Attack+Use` are intentionally mutually exclusive. Don't fix them.
 
-## Rules (loaded into context)
+## Repo layout (brief)
 
-@.claude/rules/tech-stack.md
-@.claude/rules/gestures.md
-@.claude/rules/opencv-pytorch.md
+```
+src/minecraft_cv/
+├── capture/        # VideoCapture wrapper + single-slot FrameBuffer
+├── tracking/       # HandTracker ABC, MediaPipe backend, FaceLandmarker
+├── gestures/       # Schmitt triggers, pinch/extension detectors, face gestures, safety
+├── joystick/       # ScreenJoystick, WristTiltJoystick, One-Euro filter
+├── input/          # InputEmitter ABC, NullEmitter, MacInputEmitter
+├── ui/             # PySide6 desktop app + overlay + Qt/pipeline bridge
+├── runtime.py      # FrameProcessor: camera/clip loop
+├── pipeline.py     # Pipeline: gestures + joystick → InputEmitter
+└── config.py       # pydantic Settings (all tunable values via config.yaml)
+cli.py              # mcv entrypoint (ui, overlay, run, analyze, bench, doctor, gestures)
+tests/              # mirrors src/; gesture SM tests are pure/deterministic
+```
+
+## Context files — read when the task touches these areas
+
+Read the relevant file(s) **before** writing any code in that area. Do not load files
+for areas you're not touching.
+
+| When working on… | Read |
+|---|---|
+| Gesture state machines, Schmitt triggers, pinch bitmask, face gestures, head gestures, concurrency, tracking-loss safety | `.claude/rules/gestures.md` |
+| Mouse look, camera sensitivity, `ScreenJoystick`, `WristTiltJoystick`, One-Euro filter, cursor reseeding, peace-sign clutch | `.claude/rules/mouse-look.md` |
+| Camera capture, OpenCV preprocessing, NumPy vectorization, MPS/PyTorch inference, frame-rate/latency, macOS camera permissions | `.claude/rules/opencv-pytorch.md` |
+| Input emission — `pynput`, Quartz CGEvent, `InputEmitter`/`MacInputEmitter`, keyboard hold vs tap, scroll, Accessibility permissions | `.claude/rules/input-layer.md` |
+| PySide6 UI, overlay, `PipelineWorker`, Qt threading, window pinning, `MainWindow`, `CameraView`, `KeymapPanel` | `.claude/rules/ui-qt.md` |
+| Adding/removing dependencies, MediaPipe landmarks, architecture overview, code style, config system | `.claude/rules/tech-stack.md` |

@@ -52,13 +52,8 @@ No conflict groups on the left hand — diagonal movement is intentional.
 
 ### Mouse-look (cursor signal)
 
-Camera look uses the **index-MCP position** (landmark 5) tracked frame-to-frame. The right joystick is a `ScreenJoystick` with a fixed neutral anchor at `(0.75, 0.5)` by default. The per-frame delta is:
-
-```
-mouse_delta = (current_index_mcp - prev_index_mcp) * right_sensitivity
-```
-
-filtered by a **One-Euro velocity-adaptive filter** (`joystick.look_filter: one_euro`). A cursor re-seed (via peace-sign or on re-entry) sets `_right_cursor_prev` to the current position without emitting movement.
+Camera look uses the **index-MCP position** (landmark 5) tracked frame-to-frame via
+`ScreenJoystick` + One-Euro filter. For full details see `.claude/rules/mouse-look.md`.
 
 ---
 

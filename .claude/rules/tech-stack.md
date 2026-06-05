@@ -81,24 +81,12 @@ not use PyTorch. When PyTorch is active:
 
 ## Input injection — pynput + Quartz CGEvent (macOS)
 
-Two separate libraries handle different input types:
+See `.claude/rules/input-layer.md` for the full contract (emitter interface,
+permission requirements, keyboard hold vs tap, scroll, and safety rules).
 
-- **`pynput`** — keyboard key down/up (Space, Shift, E, Q, W/A/S/D) and scroll wheel
-  (hotbar next/prev). Works well for discrete key events.
-- **`pyobjc-framework-Quartz` (CGEvent)** — relative mouse deltas for camera look.
-  Quartz gives lower latency than `pynput` mouse and sends true relative motion, which
-  is what Minecraft reads. Emit small, frequent deltas; don't correct for macOS
-  pointer acceleration at the injection level.
-
-Both require **Accessibility / Input Monitoring** granted to the terminal app in
-System Settings → Privacy & Security. Without it, events are silently dropped — no
-error. Detect at startup by attempting a test event and checking the return code.
-
-The entire input layer sits behind an `InputEmitter` interface:
-- `NullEmitter` (default) — no-ops all calls. Used in tests and `--no-input` mode.
-- `MacInputEmitter` — the real pynput + Quartz implementation.
-
-Never emit real input in tests. Never skip the emitter interface.
+Summary: pynput handles keys/scroll; Quartz CGEvent handles mouse-look deltas.
+`NullEmitter` is always the default; `MacInputEmitter` is the real implementation.
+Never emit real input in tests.
 
 ## Config — pydantic-settings + config.yaml
 
