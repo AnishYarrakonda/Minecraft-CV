@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from minecraft_cv.runtime import FrameProcessor
 from minecraft_cv.ui import theme
 from minecraft_cv.ui.camera_view import CameraView
+from minecraft_cv.ui.macos_window import keep_window_in_front
 from minecraft_cv.ui.worker import PipelineWorker
 
 if TYPE_CHECKING:
@@ -185,12 +186,16 @@ class OverlayWindow(QWidget):
         self._prev_gestures: frozenset[str] = frozenset()
         self._drag_offset: QPoint | None = None
         self._live = settings.input.enabled
+        self._native_pinned = False
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
+        # Keep this Tool window visible when the app is deactivated (e.g. Minecraft focused);
+        # complements the native hidesOnDeactivate=False applied in showEvent.
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
         self.setMinimumSize(320, 240)
         self.resize(400, 300)
 
@@ -268,6 +273,15 @@ class OverlayWindow(QWidget):
 
     def mouseReleaseEvent(self, event: object) -> None:  # type: ignore[override]  # noqa: ARG002
         self._drag_offset = None
+
+    # --- native window pinning -----------------------------------------------
+
+    def showEvent(self, event: object) -> None:  # type: ignore[override]
+        """Pin the native window in front once it is realized (macOS); harmless elsewhere."""
+        super().showEvent(event)  # type: ignore[arg-type]
+        if not self._native_pinned:
+            keep_window_in_front(self)
+            self._native_pinned = True
 
     # --- context menu --------------------------------------------------------
 
