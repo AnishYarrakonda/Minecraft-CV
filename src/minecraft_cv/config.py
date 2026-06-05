@@ -290,7 +290,13 @@ def _default_right_detector_gestures() -> dict[str, GestureDetectorSettings]:
             mode="hold",
             extension_fingers=("index", "middle"),
             curl_fingers=("ring", "pinky"),
-            suppresses=("attack", "use", "jump"),
+            suppresses=("attack", "use", "jump", "swap_offhand"),
+        ),
+        "swap_offhand": GestureDetectorSettings(
+            detector="pinch",
+            finger="pinky",
+            t_engage=0.30,
+            t_release=0.45,
         ),
     }
 
@@ -330,19 +336,6 @@ def _default_face_gestures() -> dict[str, FaceGestureDetectorSettings]:
             t_release=0.35,
             engage_frames=2,
         ),
-        "sneak": FaceGestureDetectorSettings(
-            blendshape="cheekPuff",  # puff cheeks -> Shift (hold while sneaking)
-            t_engage=0.6,
-            t_release=0.35,
-            engage_frames=3,
-            release_frames=2,
-        ),
-        "swap_offhand": FaceGestureDetectorSettings(
-            blendshape="jawRight",  # shift jaw right -> F
-            t_engage=0.5,
-            t_release=0.3,
-            engage_frames=2,
-        ),
     }
 
 
@@ -375,6 +368,32 @@ class HeadRollGestureSettings(BaseModel):
         return self
 
 
+class HeadPitchGestureSettings(BaseModel):
+    """Head-pitch (nodding down) gesture thresholds.
+    
+    Uses the 2D vertical ratio of (chin to nose) / (nose to nasion).
+    The ratio drops when looking down. Hysteresis requires release_ratio > engage_ratio.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    enabled: bool = True
+    gesture: str = "sneak"
+    engage_ratio: float = Field(default=0.85, gt=0.0)
+    release_ratio: float = Field(default=0.95, gt=0.0)
+    engage_frames: int = Field(default=3, ge=1)
+    release_frames: int = Field(default=2, ge=1)
+
+    @model_validator(mode="after")
+    def _check_hysteresis(self) -> HeadPitchGestureSettings:
+        if not self.release_ratio > self.engage_ratio:
+            raise ValueError(
+                f"release_ratio ({self.release_ratio}) must be strictly greater than "
+                f"engage_ratio ({self.engage_ratio}) for head-pitch gestures."
+            )
+        return self
+
+
 class GestureSettings(BaseModel):
     """Per-hand/face maps of gesture-name -> detector-backed hold gesture config."""
 
@@ -390,6 +409,7 @@ class GestureSettings(BaseModel):
         default_factory=_default_face_gestures
     )
     head_tilt: HeadRollGestureSettings = Field(default_factory=HeadRollGestureSettings)
+    head_pitch: HeadPitchGestureSettings = Field(default_factory=HeadPitchGestureSettings)
 
 
 class JoystickSettings(BaseModel):

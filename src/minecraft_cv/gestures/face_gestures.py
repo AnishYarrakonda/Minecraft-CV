@@ -176,6 +176,86 @@ class HeadRollDetector:
         return events
 
 
+def _head_pitch_ratio(result: FaceResult) -> float | None:
+    """Ratio of (nose-to-chin) / (nasion-to-nose) 2D distance.
+    
+    Drops significantly when the user nods their head down.
+    """
+    landmarks = result.landmarks
+    if landmarks is None or len(landmarks) <= 168:
+        return None
+    nose_y = landmarks[1][1]
+    chin_y = landmarks[152][1]
+    nasion_y = landmarks[168][1]
+    
+    top_dist = nose_y - nasion_y
+    bottom_dist = chin_y - nose_y
+    if top_dist <= 0:
+        return None
+    return bottom_dist / top_dist
+
+
+class HeadPitchDetector:
+    """Schmitt trigger over 2D pitch ratio, emitting a downward-nod gesture.
+    
+    The ratio drops when looking down. Engages when ratio drops below `engage_ratio`.
+    Releases when ratio rises above `release_ratio`.
+    """
+    def __init__(
+        self,
+        gesture: str,
+        engage_ratio: float,
+        release_ratio: float,
+        engage_frames: int = 3,
+        release_frames: int = 2,
+    ) -> None:
+        self.gesture = gesture
+        self.engage_ratio = engage_ratio
+        self.release_ratio = release_ratio
+        self.engage_frames = engage_frames
+        self.release_frames = release_frames
+        
+        self._is_active = False
+        self._consecutive_above = 0
+        self._consecutive_below = 0
+        
+    @property
+    def name(self) -> str:
+        return self.gesture
+        
+    def update(self, result: FaceResult) -> list[GestureEvent]:
+        ratio = _head_pitch_ratio(result)
+        events: list[GestureEvent] = []
+        
+        if self._is_active:
+            if ratio is None or ratio >= self.release_ratio:
+                self._consecutive_above += 1
+                if self._consecutive_above >= self.release_frames:
+                    self._is_active = False
+                    events.append(GestureEvent(self.gesture, KEY_UP, "face"))
+            else:
+                self._consecutive_above = 0
+        else:
+            if ratio is not None and ratio <= self.engage_ratio:
+                self._consecutive_below += 1
+                if self._consecutive_below >= self.engage_frames:
+                    self._is_active = True
+                    events.append(GestureEvent(self.gesture, KEY_DOWN, "face"))
+            else:
+                self._consecutive_below = 0
+                
+        return events
+        
+    def reset(self) -> list[GestureEvent]:
+        events = []
+        if self._is_active:
+            events.append(GestureEvent(self.gesture, KEY_UP, "face"))
+            self._is_active = False
+        self._consecutive_above = 0
+        self._consecutive_below = 0
+        return events
+
+
 class FaceGestureStateMachine:
     """Manages all face gestures (blendshape gestures + head-roll scroll)."""
 
@@ -183,8 +263,9 @@ class FaceGestureStateMachine:
         self,
         settings: dict[str, Any],
         head_roll: Any | None = None,
+        head_pitch: Any | None = None,
     ) -> None:
-        """Initialize from face gesture settings and optional head-roll settings."""
+        """Initialize from face gesture settings and optional head-roll/pitch settings."""
         self._detectors: list[FaceGestureDetector] = []
         for name, config in settings.items():
             detector = FaceGestureDetector(
@@ -208,6 +289,16 @@ class FaceGestureStateMachine:
                 release_frames=head_roll.release_frames,
             )
 
+        self._head_pitch: HeadPitchDetector | None = None
+        if head_pitch is not None and getattr(head_pitch, "enabled", True):
+            self._head_pitch = HeadPitchDetector(
+                gesture=head_pitch.gesture,
+                engage_ratio=head_pitch.engage_ratio,
+                release_ratio=head_pitch.release_ratio,
+                engage_frames=head_pitch.engage_frames,
+                release_frames=head_pitch.release_frames,
+            )
+
         self._last_result = FaceResult()
 
     def update(self, result: FaceResult) -> list[GestureEvent]:
@@ -218,6 +309,8 @@ class FaceGestureStateMachine:
             events.extend(detector.update(result))
         if self._head_roll is not None:
             events.extend(self._head_roll.update(result))
+        if self._head_pitch is not None:
+            events.extend(self._head_pitch.update(result))
         return events
 
     def active_gestures(self) -> frozenset[str]:
@@ -225,6 +318,8 @@ class FaceGestureStateMachine:
         names = {d.name for d in self._detectors if d._is_active}
         if self._head_roll is not None and self._head_roll._active is not None:
             names.add(self._head_roll._name(self._head_roll._active))
+        if self._head_pitch is not None and self._head_pitch._is_active:
+            names.add(self._head_pitch.name)
         return frozenset(names)
 
     def status(self) -> Literal["tracking", "absent"]:
@@ -244,4 +339,6 @@ class FaceGestureStateMachine:
                 events.append(GestureEvent(detector.name, KEY_UP, "face"))
         if self._head_roll is not None:
             events.extend(self._head_roll.reset())
+        if self._head_pitch is not None:
+            events.extend(self._head_pitch.reset())
         return events

@@ -157,6 +157,7 @@ class Pipeline:
             face_sm = FaceGestureStateMachine(
                 settings.gestures.face,
                 head_roll=settings.gestures.head_tilt,
+                head_pitch=settings.gestures.head_pitch,
             )
 
         j = settings.joystick

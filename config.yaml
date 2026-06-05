@@ -84,6 +84,13 @@ gestures:
       - attack
       - use
       - jump
+      - swap_offhand
+    swap_offhand:
+      detector: pinch
+      finger: pinky
+      mode: hold
+      t_engage: 0.3
+      t_release: 0.45
   face:
     inventory:
       blendshape: browInnerUp  # raise eyebrows -> E
@@ -95,17 +102,6 @@ gestures:
       t_engage: 0.6
       t_release: 0.35
       engage_frames: 2
-    sneak:
-      blendshape: cheekPuff  # puff cheeks -> Shift (hold while sneaking)
-      t_engage: 0.6
-      t_release: 0.35
-      engage_frames: 3
-      release_frames: 2
-    swap_offhand:
-      blendshape: jawRight  # shift jaw right -> F
-      t_engage: 0.5
-      t_release: 0.3
-      engage_frames: 2
   # Head roll (ear-to-shoulder) -> hotbar scroll. Swap left/right gesture names if the
   # mirrored feed inverts the direction.
   head_tilt:
@@ -115,6 +111,14 @@ gestures:
     engage_deg: 12.0
     release_deg: 7.0
     engage_frames: 2
+    release_frames: 2
+  # Head pitch (nodding down) -> sneak.
+  head_pitch:
+    enabled: true
+    gesture: sneak
+    engage_ratio: 0.85
+    release_ratio: 0.95
+    engage_frames: 3
     release_frames: 2
 
 face_tracking:
