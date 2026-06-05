@@ -1,6 +1,6 @@
 import cv2
 import time
-from src.minecraft_cv.tracking.face_tracker import FaceTracker
+from minecraft_cv.tracking.face_tracker import FaceTracker
 
 def main():
     img = cv2.imread("face.jpg")

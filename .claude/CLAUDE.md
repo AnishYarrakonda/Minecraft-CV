@@ -43,7 +43,7 @@ Never debug gesture logic against live Minecraft input; it's non-deterministic a
 1. `T_release > T_engage` strictly for every pinch. A test asserts this for all gestures.
 2. Input emitter is a no-op by default. Tests/dry-runs must never move the real mouse.
 3. CPU fallback always works. MPS is an accelerator, never a hard dependency.
-4. `Attack+Use` and `Jump+Sneak` are intentionally mutually exclusive. Don't fix them.
+4. `Attack+Use` are intentionally mutually exclusive. Don't fix them.
 
 ## Rules (loaded into context)
 

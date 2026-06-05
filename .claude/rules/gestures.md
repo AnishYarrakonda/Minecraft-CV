@@ -43,9 +43,10 @@ No conflict groups on the left hand — diagonal movement is intentional.
 | Attack / Break    | Thumb→Index       | Left click     |
 | Use / Interact    | Thumb→Middle      | Right click    |
 | Jump              | Thumb→Ring        | Space          |
+| Swap Offhand      | Thumb→Pinky       | F              |
 | Recenter (clutch) | Peace sign¹       | (no key)       |
 
-¹ Peace sign = `extension_combo`: index + middle extended above `T_engage`, ring + pinky curled below `T_release`. While held, it suppresses attack, use, and jump; freezes mouse output; and seeds the cursor anchor at the current index-MCP position (mouse-lifted clutch). On release, look resumes from the new anchor — no camera snap.
+¹ Peace sign = `extension_combo`: index + middle extended above `T_engage`, ring + pinky curled below `T_release`. While held, it suppresses attack, use, jump, and swap_offhand; freezes mouse output; and seeds the cursor anchor at the current index-MCP position (mouse-lifted clutch). On release, look resumes from the new anchor — no camera snap.
 
 **Conflict group `primary_click`**: Attack and Use are mutually exclusive. The stronger pinch wins; the weaker is force-released. This reflects Minecraft's game-logic constraint.
 
@@ -71,14 +72,12 @@ MediaPipe FaceLandmarker provides 52 blendshape scores per frame. Each face gest
 |---------------|-----------------|--------------|-------|
 | Inventory     | `browInnerUp`   | `E`          | Pulse |
 | Throw Item    | `jawOpen`       | `Q`          | Pulse |
-| Sneak         | `mouthPucker`   | `Left Shift` | Hold  |
-| Swap Offhand  | `noseSneerLeft` | `F`          | Pulse |
 
 Face gesture semantics: **`t_engage > t_release`** (higher score = more engaged). `engage_frames` consecutive frames above `t_engage` fires KEY_DOWN; `release_frames` consecutive frames below `t_release` fires KEY_UP. Debounce absorbs single-frame noise.
 
 ---
 
-## Head-tilt: hotbar scroll
+## Head gestures: sneak and hotbar scroll
 
 The head-roll angle is derived from the outer eye-corner line (FaceMesh landmarks 33 → 263). Roll is `atan2(dy, dx)` of that vector in normalized image space.
 
@@ -90,6 +89,8 @@ roll < -engage_deg  →  hotbar_prev (scroll down)
 ```
 
 Each releases when the angle returns inside `±release_deg`. `engage_deg > release_deg` strictly. A held tilt re-emits scroll ticks at `scroll_repeat_rate_hz`.
+
+The head-pitch (nodding down) gesture uses the 2D vertical ratio of (chin to nose) / (nose to nasion). The ratio drops when looking down, driving the `sneak` gesture via a Schmitt trigger.
 
 ---
 

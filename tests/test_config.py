@@ -32,8 +32,8 @@ def test_defaults_construct_without_yaml() -> None:
         "move_left",
         "move_right",
     }
-    assert set(s.gestures.right_hand) == {"attack", "use", "jump", "recenter"}
-    assert set(s.gestures.face) == {"inventory", "throw_item", "sneak", "swap_offhand"}
+    assert set(s.gestures.right_hand) == {"attack", "use", "jump", "recenter", "swap_offhand"}
+    assert set(s.gestures.face) == {"inventory", "throw_item"}
     assert s.gestures.head_tilt.enabled is True
 
     # Check new bindings exist
@@ -60,10 +60,10 @@ def test_load_project_config_yaml() -> None:
     assert s.gestures.right_hand["jump"].conflict_group is None
     assert "sneak" not in s.gestures.right_hand
     assert s.gestures.right_hand["recenter"].detector == "extension_combo"
-    assert s.gestures.right_hand["recenter"].suppresses == ("attack", "use", "jump")
+    assert s.gestures.right_hand["recenter"].suppresses == ("attack", "use", "jump", "swap_offhand")
     assert s.gestures.right_hand["attack"].finger == "index"
-    assert s.gestures.face["sneak"].blendshape == "mouthPucker"
-    assert s.gestures.face["swap_offhand"].blendshape == "noseSneerLeft"
+    assert s.gestures.head_pitch.gesture == "sneak"
+    assert s.gestures.right_hand["swap_offhand"].finger == "pinky"
     # input_resolution list in YAML is coerced to a tuple.
     assert s.tracking.input_resolution == (256, 256)
 
@@ -199,6 +199,6 @@ def test_project_config_yaml_loads_new_fields() -> None:
     assert s.joystick.right_smoothing == pytest.approx(0.6)
     assert s.joystick.right_sensitivity == pytest.approx(40.0)
     assert s.joystick.look_accel_exponent == pytest.approx(1.25)
-    assert s.joystick.one_euro_min_cutoff == pytest.approx(0.65)
-    assert s.joystick.one_euro_beta == pytest.approx(0.035)
+    assert s.joystick.one_euro_min_cutoff == pytest.approx(0.1)
+    assert s.joystick.one_euro_beta == pytest.approx(0.05)
     assert s.input.mouse_delta_scale == pytest.approx(58.0)

@@ -136,8 +136,8 @@ joystick:
   smoothing: 0.4
   right_smoothing: 0.6
   look_filter: one_euro
-  one_euro_min_cutoff: 0.65
-  one_euro_beta: 0.035
+  one_euro_min_cutoff: 0.1
+  one_euro_beta: 0.05
   one_euro_d_cutoff: 1.0
 input:
   enabled: false

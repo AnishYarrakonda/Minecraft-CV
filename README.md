@@ -50,6 +50,7 @@ Hold two pinches at once for diagonal movement (e.g. index + middle = forward-ri
 | Pinch thumb → index finger | Attack / mine (left click) |
 | Pinch thumb → middle finger | Place / interact (right click) |
 | Pinch thumb → ring finger | Jump (Space) |
+| Pinch thumb → pinky finger | Swap offhand (F) |
 | Peace sign (index + middle extended, ring + pinky curled) | Relocalize camera neutral |
 
 ### Face — actions
@@ -58,10 +59,12 @@ Hold two pinches at once for diagonal movement (e.g. index + middle = forward-ri
 |---|---|
 | Raise eyebrows | Inventory (E) |
 | Open mouth | Throw item (Q) |
-| Purse lips | Sneak (Shift, hold) |
-| Scrunch nose | Swap offhand (F) |
 
-### Head tilt — hotbar
+### Head — actions
+
+| Gesture | Action |
+|---|---|
+| Nod head down | Sneak (Shift, hold) |
 
 | Gesture | Action |
 |---|---|

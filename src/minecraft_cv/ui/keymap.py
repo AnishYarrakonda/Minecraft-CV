@@ -150,6 +150,21 @@ def build_keymap(settings: Settings) -> list[KeyRow]:
                     finger=descriptor,
                 )
             )
+
+    # Head-pitch (nod) gesture
+    pitch = getattr(settings.gestures, "head_pitch", None)
+    if pitch is not None and getattr(pitch, "enabled", False):
+        binding = bindings.get(pitch.gesture)
+        if binding is not None:
+            rows.append(
+                KeyRow(
+                    gesture=pitch.gesture,
+                    name=display_name(pitch.gesture),
+                    key=key_label(binding),
+                    hand="face",
+                    finger="Nod down",
+                )
+            )
     return rows
 
 

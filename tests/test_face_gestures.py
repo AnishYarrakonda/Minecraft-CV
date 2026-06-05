@@ -86,17 +86,17 @@ def test_face_gesture_reset() -> None:
     assert events[0].action == KEY_UP
 
 
-def test_swap_offhand_default_uses_nose_sneer() -> None:
-    """F (swap offhand) is triggered by a nose scrunch."""
-    face = Settings().gestures.face
-    assert face["swap_offhand"].blendshape == "noseSneerLeft"
+def test_swap_offhand_uses_right_pinky() -> None:
+    """F (swap offhand) is triggered by the right pinky pinch."""
+    right_hand = Settings().gestures.right_hand
+    assert right_hand["swap_offhand"].finger == "pinky"
 
 
-def test_sneak_face_gesture_uses_mouth_pucker() -> None:
-    """Sneak is triggered by pursing lips (face gesture, not right-hand pinky)."""
-    face = Settings().gestures.face
-    assert face["sneak"].blendshape == "mouthPucker"
-    assert face["sneak"].t_engage > face["sneak"].t_release
+def test_sneak_uses_head_pitch_nod() -> None:
+    """Sneak is triggered by a head pitch downward nod."""
+    head_pitch = Settings().gestures.head_pitch
+    assert head_pitch.gesture == "sneak"
+    assert head_pitch.engage_ratio < head_pitch.release_ratio
 
 
 def _names(events: list) -> set:

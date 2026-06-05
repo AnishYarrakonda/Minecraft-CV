@@ -426,6 +426,15 @@ class Pipeline:
 
         out = (signal - self._right_cursor_prev) * self.right_joystick.sensitivity
         self._seed_right_cursor(signal)
+
+        # Apply exponential acceleration for smoother micro-movements and faster flicks
+        mag = np.linalg.norm(out)
+        if mag > 0 and self._look_accel_exponent != 1.0:
+            # Scale magnitude exponentially. A scale factor ensures 1.0 px movement stays 1.0.
+            # Using absolute coordinates for the exponent so small moves (<1) get smaller,
+            # and large moves get larger.
+            out = out * ((mag ** self._look_accel_exponent) / mag)
+
         if out[0] != 0.0 or out[1] != 0.0:
             self.emitter.mouse_move(float(out[0]), float(out[1]))
         else:

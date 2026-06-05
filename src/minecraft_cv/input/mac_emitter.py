@@ -81,7 +81,38 @@ class MacInputEmitter(InputEmitter):
         self._move_accum_x = 0.0
         self._move_accum_y = 0.0
 
+        self._activity = None
+        self._disable_app_nap()
         self._check_permissions()
+
+    # --- app nap prevention ------------------------------------------------
+    def _disable_app_nap(self) -> None:
+        """Prevent macOS from throttling the pipeline when the window is occluded."""
+        try:
+            import Foundation
+
+            options = (
+                Foundation.NSActivityUserInitiated
+                | Foundation.NSActivityLatencyCritical
+            )
+            self._activity = (
+                Foundation.NSProcessInfo.processInfo().beginActivityWithOptions_reason_(
+                    options, "minecraft_cv live tracking"
+                )
+            )
+        except Exception:
+            pass
+
+    def _enable_app_nap(self) -> None:
+        """Allow macOS to throttle the app again."""
+        if self._activity is not None:
+            try:
+                import Foundation
+
+                Foundation.NSProcessInfo.processInfo().endActivity_(self._activity)
+            except Exception:
+                pass
+            self._activity = None
 
     # --- permission detection ----------------------------------------------
     def _check_permissions(self) -> None:
@@ -257,3 +288,5 @@ class MacInputEmitter(InputEmitter):
             self.release_all()
         except Exception:  # pragma: no cover - defensive shutdown
             print("[mac-emitter] warning: release_all failed during shutdown", file=sys.stderr)
+        finally:
+            self._enable_app_nap()
