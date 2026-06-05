@@ -1,151 +1,191 @@
-# minecraft_cv — Control Minecraft with hand gestures
+# minecraft_cv — Play Minecraft with your hands 🤚
 
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Platform: macOS 13+](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-> Play vanilla Minecraft — no mods, no plugins. Just your webcam and your hands.
+> **Vanilla Minecraft. No mods, no plugins. Just your webcam.**
+> Your hands walk, mine, build, jump, and aim — in real time, at full speed.
 
-![minecraft_cv in action](docs/demo.gif)
+<!--
+  🎥 HERO VIDEO — drag your .mp4 onto the line below directly in the GitHub
+  README editor. GitHub uploads it and replaces this comment with a playable
+  video player. (A raw <video src="..."> to a repo file will NOT autoplay on
+  GitHub — the drag-and-drop user-attachments URL is what renders.)
+-->
 
-Your webcam reads your hand pose in real time. Your hands walk the character, aim the camera, mine blocks, place items, jump, sneak, and scroll the hotbar — all at full speed using real OS-level input injection. No Minecraft mod required; it works with any version, Java or Bedrock.
-
-**Genuinely playable.** Not a proof of concept — low latency, Schmitt-trigger hysteresis on every pinch, and a calibrated deadzone so your hands stay comfortable.
-
-> **macOS only** — relies on AVFoundation for camera capture and Quartz CGEvent for input injection.
-
----
-
-## The App
-
-![minecraft_cv desktop app](docs/screenshot.png)
-
-`minecraft_cv` ships with a polished desktop app. The camera feed shows your hand skeleton live against a clean dark background, while a sidebar lights up each key mapping as you gesture and displays WASD / look state per hand. Opens in **Dry-Run** by default — no real input is emitted until you click **Go Live**.
-
-```bash
-pip install -e .
-mcv ui          # or: python main.py
-```
+https://github.com/AnishYarrakonda/Minecraft-CV/assets/REPLACE-ME/demo.mp4
 
 ---
 
-## How to control Minecraft
+## ⚡ Quickstart
 
-### Left hand — WASD movement
-
-| Gesture | Action |
-|---|---|
-| Pinch thumb → index finger | Move right (D) |
-| Pinch thumb → middle finger | Move forward (W) |
-| Pinch thumb → ring finger | Move left (A) |
-| Pinch thumb → pinky finger | Move back (S) |
-
-Hold two pinches at once for diagonal movement (e.g. index + middle = forward-right).
-
-### Right hand — camera & combat
-
-| Gesture | Action |
-|---|---|
-| Move hand across frame | Aim camera (mouse look) |
-| Pinch thumb → index finger | Attack / mine (left click) |
-| Pinch thumb → middle finger | Place / interact (right click) |
-| Pinch thumb → ring finger | Jump (Space) |
-| Pinch thumb → pinky finger | Swap offhand (F) |
-| Peace sign (index + middle extended, ring + pinky curled) | Relocalize camera neutral |
-
-### Face — actions
-
-| Gesture | Action |
-|---|---|
-| Raise eyebrows | Inventory (E) |
-| Open mouth | Throw item (Q) |
-
-### Head — actions
-
-| Gesture | Action |
-|---|---|
-| Nod head down | Sneak (Shift, hold) |
-
-| Gesture | Action |
-|---|---|
-| Roll head toward left shoulder | Hotbar next (scroll up) |
-| Roll head toward right shoulder | Hotbar prev (scroll down) |
-
-All inputs work at the same time — walk, jump, attack, and look simultaneously with no conflicts.
-
----
-
-## Setup
-
-**Prerequisites**
-- macOS 13+
-- Python 3.11+
-- Camera and Accessibility permissions (the `doctor` command checks both)
-
-**Install**
+macOS 13+ and Python 3.11+. One command:
 
 ```bash
 git clone https://github.com/AnishYarrakonda/Minecraft-CV && cd Minecraft-CV
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+./setup.sh
 ```
 
-**First run**
+Then launch the app:
 
 ```bash
-# Verify camera and permissions are ready
-.venv/bin/python -m minecraft_cv.cli doctor
-
-# Open the desktop app (recommended)
-.venv/bin/python -m minecraft_cv.cli ui
-
-# Or run headless with debug overlay (no real input, safe to try first)
-.venv/bin/python -m minecraft_cv.cli run --no-input --debug-overlay
+source .venv/bin/activate
+mcv ui
 ```
 
-The app opens in **Dry-Run** mode — no real input is emitted until you click **Go Live**.
+That's it. The app opens in **Dry-Run** mode — nothing touches your real mouse or
+keyboard until you click **Go Live**. Open Minecraft, click Go Live, and play.
+
+> macOS will ask for **Camera** and **Accessibility** permissions on first run.
+> Grant both (to your terminal app), or run `mcv doctor` to check what's missing.
 
 ---
 
-## Commands
+## 🎮 Controls
+
+Open or relaxed hands = idle. Pinch your **thumb to a fingertip** to act.
+Both hands, your face, and your head all work **at the same time** — walk, aim,
+mine, and open your inventory simultaneously.
+
+### 🫲 Left hand — movement (WASD)
+
+| Gesture | Action |
+|---|---|
+| Thumb → **index** | Move right (D) |
+| Thumb → **middle** | Move forward (W) |
+| Thumb → **ring** | Move left (A) |
+| Thumb → **pinky** | Move back (S) |
+
+Hold two pinches for diagonals (index + middle = forward-right).
+
+### 🫱 Right hand — camera & combat
+
+| Gesture | Action |
+|---|---|
+| **Move hand across the frame** | Aim camera (mouse look) |
+| Thumb → **index** | Attack / mine (left click) |
+| Thumb → **middle** | Place / interact (right click) |
+| Thumb → **ring** | Jump (Space) |
+| Thumb → **pinky** | Swap offhand (F) |
+| ✌️ **Peace sign** (index + middle up, ring + pinky curled) | Recenter camera — see [Common Issues](#-common-issues) |
+
+### 😮 Face & head
+
+| Gesture | Action |
+|---|---|
+| Raise eyebrows | Open inventory (E) |
+| Open mouth | Throw item (Q) |
+| Nod head down | Sneak (hold Shift) |
+| Tilt head toward left shoulder | Hotbar next (scroll up) |
+| Tilt head toward right shoulder | Hotbar prev (scroll down) |
+
+Want the full reference card in your terminal? Run `mcv gestures`.
+
+---
+
+## 🛠 Common Issues
+
+**1. The camera keeps drifting and I run out of room to aim.**
+Your hand has a limited physical range, so the camera anchor can drift off-center.
+Hold the ✌️ **peace sign** to "lift the mouse": it freezes the camera, lets you
+reposition your hand anywhere comfortable, and resumes aiming from the new spot —
+no snap. This is the intended way to recenter; use it freely.
+
+**2. Black or frozen camera feed (no hand detected).**
+This is almost always a permissions issue, not a bug. macOS silently hands you
+black frames if Camera access isn't granted. Open **System Settings → Privacy &
+Security → Camera**, enable your terminal app (Terminal/iTerm/VS Code), and fully
+restart it. Run `mcv doctor` to confirm.
+
+**3. Gestures show in the app but Minecraft doesn't respond.**
+Input injection needs **Accessibility / Input Monitoring** — a *separate* grant
+from Camera. Without it, key/mouse events are dropped with no error. Enable your
+terminal app under **System Settings → Privacy & Security → Accessibility**, then
+restart it. (Also: make sure you clicked **Go Live**, not just opened the app.)
+
+**4. It grabbed my iPhone instead of my webcam.**
+macOS Continuity Camera may silently pick your iPhone as camera 0. Pin the right
+device by setting the camera index in `config.yaml`, then relaunch. Run
+`mcv doctor` to list what it's seeing.
+
+**5. The camera look feels laggy or jittery.**
+Look smoothing and sensitivity live in `config.yaml` under `joystick:`. Lower
+`right_sensitivity` if aiming feels twitchy; tune `one_euro_min_cutoff` /
+`one_euro_beta` if it feels mushy when flicking. If the whole app is slow, close
+other camera apps and confirm you're on Apple Silicon (CPU path targets 30 fps).
+
+---
+
+## 📋 Commands
 
 | Command | Description |
 |---|---|
-| `mcv ui` | Launch the polished desktop app (recommended) |
-| `mcv overlay` | Compact always-on-top overlay that stays in front of Minecraft (even fullscreen) |
-| `mcv run` | Headless gesture controller (`--input` for live, `--no-input` for dry-run) |
+| `mcv ui` | Polished desktop app (recommended) |
+| `mcv overlay` | Compact always-on-top HUD that stays in front of Minecraft, even fullscreen |
+| `mcv run` | Headless controller (`--input` live, `--no-input` dry-run) |
 | `mcv doctor` | Check camera, permissions, and system health |
-| `mcv analyze` | Analyze a recorded clip offline |
-| `mcv bench` | Benchmark tracking backend latency |
+| `mcv analyze <clip>` | Run a recorded clip through the pipeline offline |
+| `mcv bench` | Benchmark tracking-backend latency |
 | `mcv gestures` | Print the full gesture reference card |
 
 ---
 
-<details>
-<summary>How it works</summary>
+<br>
 
-Three independent signal streams run concurrently per camera frame:
+> The rest of this README is for the curious — how it's built and why it's safe.
+> You don't need any of it to play.
 
-**Pinch bitmask (both hands)** — Thumb-to-fingertip distances are computed in one vectorized NumPy call and normalized by hand scale so thresholds never need recalibration just because you moved closer to the camera. Each pinch passes through a Schmitt-trigger hysteresis gate (`T_engage < T_release`) to prevent threshold jitter from causing rapid key chattering. Left-hand pinches drive WASD; right-hand pinches drive attack, use, jump, and swap-offhand.
+## 🧠 How it works
 
-**Cursor look (right hand)** — The index-finger MCP position on screen is tracked frame-to-frame. Deltas are passed through a One-Euro velocity-adaptive filter (stable at rest, snappy in motion) then sent as relative mouse moves via Quartz CGEvent. A peace-sign gesture acts as a "mouse lifted" clutch, resetting the cursor anchor without moving the camera.
+Three independent signal streams run concurrently on every camera frame, each
+decoupled so they never block or conflict with one another:
 
-**Face + head** — MediaPipe FaceLandmarker runs alongside hand tracking. Blendshape scores feed per-gesture Schmitt triggers for inventory (raise eyebrows) and throw (open mouth). The eye-corner angle drives a head-roll detector for hotbar scroll (tilt left = next, tilt right = prev), and a head-pitch ratio drives a nod-down detector for sneak.
+```mermaid
+flowchart LR
+    CAM[📷 Webcam<br/>AVFoundation] --> MP[MediaPipe<br/>Hands + Face]
+    MP --> LH[Left hand<br/>pinch bitmask]
+    MP --> RH[Right hand<br/>pinch + cursor]
+    MP --> FH[Face + head<br/>blendshapes + roll]
 
-All paths run on CPU at 30 fps on Apple Silicon with no GPU required.
+    LH --> SM[Schmitt-trigger<br/>state machines]
+    RH --> SM
+    RH --> OE[One-Euro<br/>filter]
+    FH --> SM
 
-</details>
+    SM -->|key down/up| EMIT[InputEmitter]
+    OE -->|relative deltas| EMIT
+    EMIT -->|pynput + Quartz CGEvent| MC[🎮 Minecraft]
+```
 
----
+**Pinch bitmask (both hands).** Thumb-to-fingertip distances are computed in one
+vectorized NumPy call and normalized by hand scale, so thresholds stay valid no
+matter how close you are to the camera. Each pinch passes through a **Schmitt-trigger
+hysteresis gate** (`T_engage < T_release`) that swallows threshold jitter — no key
+chatter. Left-hand pinches drive WASD; right-hand pinches drive attack, use, jump,
+and swap-offhand.
 
-## Safety
+**Cursor look (right hand).** The index-MCP landmark is tracked frame-to-frame, and
+its deltas pass through a **One-Euro velocity-adaptive filter** (stable at rest,
+snappy in motion) before being emitted as relative mouse moves via Quartz CGEvent.
+The peace-sign clutch reseeds the cursor anchor without moving the camera.
 
-1. Input emitter is a **no-op by default** — dry-run and tests never move your real mouse or press real keys.
-2. Tracking loss releases every held key immediately — no stuck jumps, no infinite sneaking.
-3. CPU fallback always works; MPS acceleration is optional.
-4. `T_release > T_engage` strictly for every pinch — asserted in tests.
+**Face + head.** MediaPipe FaceLandmarker runs alongside hand tracking. Blendshape
+scores feed per-gesture Schmitt triggers (eyebrows → inventory, open mouth → throw);
+the eye-corner angle drives a head-roll detector for hotbar scroll; and a head-pitch
+ratio drives a nod-down detector for sneak.
 
----
+Everything runs on **CPU at 30 fps on Apple Silicon** — no GPU required. MPS is an
+optional accelerator, never a dependency.
+
+## 🔒 Safety
+
+1. The input emitter is a **no-op by default** — dry-run and tests never move your
+   real mouse or press real keys.
+2. **Tracking loss releases every held key immediately** — no stuck jumps, no
+   infinite sneaking if your hand leaves the frame.
+3. **CPU fallback always works**; MPS acceleration is purely optional.
+4. `T_release > T_engage` strictly for every pinch — asserted in the test suite.
 
 ## License
 
