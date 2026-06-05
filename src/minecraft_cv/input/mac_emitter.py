@@ -16,6 +16,7 @@ than maintaining a velocity stream.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from typing import Any
 
@@ -81,9 +82,46 @@ class MacInputEmitter(InputEmitter):
         self._move_accum_x = 0.0
         self._move_accum_y = 0.0
 
+        self._pending_dx = 0.0
+        self._pending_dy = 0.0
+        self._mouse_lock = threading.Lock()
+        self._running = True
+        self._mouse_thread = threading.Thread(target=self._mouse_loop, daemon=True)
+        self._mouse_thread.start()
+
         self._activity = None
         self._disable_app_nap()
         self._check_permissions()
+
+    # --- background loop ---------------------------------------------------
+    def _mouse_loop(self) -> None:
+        """Background thread to drain and emit mouse motion smoothly at high frequency."""
+        dt = 1.0 / 120.0
+        while self._running:
+            with self._mouse_lock:
+                if self._pending_dx != 0.0 or self._pending_dy != 0.0:
+                    drain_rate = 0.35
+                    chunk_x = self._pending_dx * drain_rate
+                    chunk_y = self._pending_dy * drain_rate
+
+                    self._pending_dx -= chunk_x
+                    self._pending_dy -= chunk_y
+
+                    if abs(self._pending_dx) < 0.01:
+                        chunk_x += self._pending_dx
+                        self._pending_dx = 0.0
+                    if abs(self._pending_dy) < 0.01:
+                        chunk_y += self._pending_dy
+                        self._pending_dy = 0.0
+
+                    self._move_accum_x += chunk_x
+                    self._move_accum_y += chunk_y
+                    sx = int(self._move_accum_x)
+                    sy = int(self._move_accum_y)
+                    self._move_accum_x -= sx
+                    self._move_accum_y -= sy
+                    self._post_relative_pixels(sx, sy)
+            time.sleep(dt)
 
     # --- app nap prevention ------------------------------------------------
     def _disable_app_nap(self) -> None:
@@ -246,19 +284,16 @@ class MacInputEmitter(InputEmitter):
             self._keyboard.release(self._resolve_key(key))
 
     def _emit_mouse_move(self, dx: float, dy: float) -> None:
-        # Accumulate sub-pixel motion and emit only the whole-pixel part, carrying the
-        # remainder so a steady slow look still advances instead of rounding away to nothing.
-        self._move_accum_x += dx * self.mouse_delta_scale
-        self._move_accum_y += dy * self.mouse_delta_scale
-        sx = int(self._move_accum_x)
-        sy = int(self._move_accum_y)
-        self._move_accum_x -= sx
-        self._move_accum_y -= sy
-        self._post_relative_pixels(sx, sy)
+        with self._mouse_lock:
+            self._pending_dx += dx * self.mouse_delta_scale
+            self._pending_dy += dy * self.mouse_delta_scale
 
     def _emit_mouse_stop(self) -> None:
-        self._move_accum_x = 0.0
-        self._move_accum_y = 0.0
+        with self._mouse_lock:
+            self._pending_dx = 0.0
+            self._pending_dy = 0.0
+            self._move_accum_x = 0.0
+            self._move_accum_y = 0.0
 
     def _emit_mouse_move_abs(self, x: float, y: float) -> None:
         self._emit_mouse_stop()
@@ -283,6 +318,8 @@ class MacInputEmitter(InputEmitter):
 
     def __exit__(self, *exc: object) -> None:
         """Release all held input on context-manager exit."""
+        self._running = False
+        self._mouse_thread.join(timeout=0.2)
         # Never leave a key stuck down on exit (normal or exceptional).
         try:
             self.release_all()
