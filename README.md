@@ -112,7 +112,7 @@ The app opens in **Dry-Run** mode — no real input is emitted until you click *
 | Command | Description |
 |---|---|
 | `mcv ui` | Launch the polished desktop app (recommended) |
-| `mcv overlay` | Compact always-on-top overlay for use alongside Minecraft |
+| `mcv overlay` | Compact always-on-top overlay that stays in front of Minecraft (even fullscreen) |
 | `mcv run` | Headless gesture controller (`--input` for live, `--no-input` for dry-run) |
 | `mcv doctor` | Check camera, permissions, and system health |
 | `mcv analyze` | Analyze a recorded clip offline |
@@ -126,11 +126,11 @@ The app opens in **Dry-Run** mode — no real input is emitted until you click *
 
 Three independent signal streams run concurrently per camera frame:
 
-**Pinch bitmask (both hands)** — Thumb-to-fingertip distances are computed in one vectorized NumPy call and normalized by hand scale so thresholds never need recalibration just because you moved closer to the camera. Each pinch passes through a Schmitt-trigger hysteresis gate (`T_engage < T_release`) to prevent threshold jitter from causing rapid key chattering. Left-hand pinches drive WASD; right-hand pinches drive attack, use, and jump.
+**Pinch bitmask (both hands)** — Thumb-to-fingertip distances are computed in one vectorized NumPy call and normalized by hand scale so thresholds never need recalibration just because you moved closer to the camera. Each pinch passes through a Schmitt-trigger hysteresis gate (`T_engage < T_release`) to prevent threshold jitter from causing rapid key chattering. Left-hand pinches drive WASD; right-hand pinches drive attack, use, jump, and swap-offhand.
 
 **Cursor look (right hand)** — The index-finger MCP position on screen is tracked frame-to-frame. Deltas are passed through a One-Euro velocity-adaptive filter (stable at rest, snappy in motion) then sent as relative mouse moves via Quartz CGEvent. A peace-sign gesture acts as a "mouse lifted" clutch, resetting the cursor anchor without moving the camera.
 
-**Face + head** — MediaPipe FaceLandmarker runs alongside hand tracking. Blendshape scores feed per-gesture Schmitt triggers for inventory, throw, sneak, and swap-offhand. The eye-corner angle drives a head-roll detector for hotbar scroll (tilt left = next, tilt right = prev).
+**Face + head** — MediaPipe FaceLandmarker runs alongside hand tracking. Blendshape scores feed per-gesture Schmitt triggers for inventory (raise eyebrows) and throw (open mouth). The eye-corner angle drives a head-roll detector for hotbar scroll (tilt left = next, tilt right = prev), and a head-pitch ratio drives a nod-down detector for sneak.
 
 All paths run on CPU at 30 fps on Apple Silicon with no GPU required.
 

@@ -123,7 +123,7 @@ src/minecraft_cv/
 │   ├── extension.py    # finger-extension ratio helpers
 │   ├── finger_state.py # FingerState dataclass + finger_extensions()
 │   ├── registry.py     # GestureStateMachine (config-driven detector map, both hands)
-│   ├── face_gestures.py # FaceGestureStateMachine + HeadRollDetector
+│   ├── face_gestures.py # FaceGestureStateMachine + HeadRollDetector + HeadPitchDetector
 │   └── safety.py       # TrackingLossGuard (key release on hand dropout)
 ├── joystick/       # joystick math and filters
 │   ├── screen.py       # ScreenJoystick (absolute screen-space, right hand cursor look)
@@ -142,6 +142,7 @@ src/minecraft_cv/
 │   ├── panels.py       # HeaderBar (Go Live / Calibrate), KeymapPanel (gesture HUD)
 │   ├── keymap.py       # per-binding key indicator widgets
 │   ├── skeleton.py     # hand-skeleton overlay on the camera view
+│   ├── macos_window.py # keep_window_in_front(): native NSWindow pin (level/Spaces/no-hide)
 │   ├── widgets.py      # shared reusable Qt widgets
 │   └── theme.py        # zinc dark-mode palette + apply_theme()
 ├── runtime.py      # FrameProcessor: camera/clip loop + face tracker on shared thread
