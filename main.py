@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Pathx
+from pathlib import Path
 
 # Must be set before Qt (PySide6) initialises OpenGL. Qt's GL init makes mediapipe
 # detect GPU as available and take the GPU landmark-projection path, which then crashes
