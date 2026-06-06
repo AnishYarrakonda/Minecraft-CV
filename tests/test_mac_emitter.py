@@ -44,18 +44,27 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, trusted: bool = True) -> 
             rec.kbd.append(("release", key))
 
     class FakeKeyCode:
-        def __init__(self, char: str) -> None:
+        def __init__(self, char: str | None = None, vk: int | None = None) -> None:
             self.char = char
+            self.vk = vk
 
         def __eq__(self, other: object) -> bool:
-            return isinstance(other, FakeKeyCode) and other.char == self.char
+            return (
+                isinstance(other, FakeKeyCode)
+                and other.char == self.char
+                and other.vk == self.vk
+            )
 
         def __hash__(self) -> int:
-            return hash(("kc", self.char))
+            return hash(("kc", self.char, self.vk))
 
         @staticmethod
         def from_char(char: str) -> FakeKeyCode:
-            return FakeKeyCode(char)
+            return FakeKeyCode(char=char)
+
+        @staticmethod
+        def from_vk(vk: int) -> FakeKeyCode:
+            return FakeKeyCode(vk=vk)
 
     keyboard_mod = ModuleType("pynput.keyboard")
     keyboard_mod.Controller = lambda: FakeKeyboard()  # type: ignore[attr-defined]
@@ -83,6 +92,15 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, trusted: bool = True) -> 
     pynput_mod = ModuleType("pynput")
     pynput_mod.keyboard = keyboard_mod  # type: ignore[attr-defined]
     pynput_mod.mouse = mouse_mod  # type: ignore[attr-defined]
+
+    # pynput._util.darwin.get_unicode_to_keycode_map: the active-layout char->vk map the
+    # emitter uses to emit letters by key code (immune to Shift-driven uppercasing). Faked
+    # deterministically so the vk-resolution path is exercised without the real macOS backend.
+    util_mod = ModuleType("pynput._util")
+    darwin_util_mod = ModuleType("pynput._util.darwin")
+    darwin_util_mod.get_unicode_to_keycode_map = lambda: {  # type: ignore[attr-defined]
+        "w": 13, "a": 0, "s": 1, "d": 2, "e": 14, "q": 12, "f": 3,
+    }
 
     # Quartz
     quartz = ModuleType("Quartz")
@@ -132,6 +150,8 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, trusted: bool = True) -> 
         ("pynput", pynput_mod),
         ("pynput.keyboard", keyboard_mod),
         ("pynput.mouse", mouse_mod),
+        ("pynput._util", util_mod),
+        ("pynput._util.darwin", darwin_util_mod),
         ("Quartz", quartz),
         ("ApplicationServices", appsvc),
     ):
@@ -166,6 +186,21 @@ def test_key_down_is_deduplicated(emitter_and_recorder) -> None:  # type: ignore
     em.key_down("shift")
     em.key_down("shift")
     assert [c for c in rec.kbd if c[0] == "press"] == [("press", "K.shift")]
+
+
+def test_letter_keys_resolve_to_vk_immune_to_shift(emitter_and_recorder) -> None:  # type: ignore[no-untyped-def]
+    """Letters emit by virtual key code, so a held Shift (sneak) can't rewrite them.
+
+    Guards the sneak/WASD bug: pynput's char-based ``_resolve`` uppercases ``'w'`` -> ``'W'``
+    while Shift is held, which collapses every movement key onto key code 0 (the A key) in
+    Minecraft. Resolving to a key code up front keeps W as W.
+    """
+    em, rec = emitter_and_recorder
+    em.key_down("shift")  # sneak holds Shift
+    em.key_down("w")
+    w_press = [c for c in rec.kbd if c[0] == "press"][-1][1]
+    assert getattr(w_press, "vk", None) == 13  # physical W, not collapsed onto 0
+    assert getattr(w_press, "char", None) is None
 
 
 def test_mouse_button_routed_to_quartz_at_current_position(emitter_and_recorder) -> None:  # type: ignore[no-untyped-def]

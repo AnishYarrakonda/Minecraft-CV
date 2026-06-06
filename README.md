@@ -1,4 +1,4 @@
-# minecraft_cv — Play Minecraft with your hands 🤚
+# minecraft_cv — Play Minecraft with your hands
 
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Platform: macOS 13+](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)
@@ -8,17 +8,13 @@
 > Your hands walk, mine, build, jump, and aim — in real time, at full speed.
 
 <!--
-  🎥 HERO VIDEO — drag your .mp4 onto the line below directly in the GitHub
-  README editor. GitHub uploads it and replaces this comment with a playable
-  video player. (A raw <video src="..."> to a repo file will NOT autoplay on
-  GitHub — the drag-and-drop user-attachments URL is what renders.)
+  Drop your demo video onto this line directly in the GitHub README editor.
+  GitHub uploads it and replaces this comment with a playable video embed.
 -->
-
-https://github.com/AnishYarrakonda/Minecraft-CV/assets/REPLACE-ME/demo.mp4
 
 ---
 
-## ⚡ Quickstart
+## Quickstart
 
 macOS 13+ and Python 3.11+. One command:
 
@@ -34,21 +30,19 @@ source .venv/bin/activate
 mcv ui
 ```
 
-That's it. The app opens in **Dry-Run** mode — nothing touches your real mouse or
-keyboard until you click **Go Live**. Open Minecraft, click Go Live, and play.
+The app opens in **Dry-Run** mode — nothing touches your real mouse or keyboard until you click **Go Live**. Open Minecraft, click Go Live, and play.
 
 > macOS will ask for **Camera** and **Accessibility** permissions on first run.
 > Grant both (to your terminal app), or run `mcv doctor` to check what's missing.
 
 ---
 
-## 🎮 Controls
+## Controls
 
 Open or relaxed hands = idle. Pinch your **thumb to a fingertip** to act.
-Both hands, your face, and your head all work **at the same time** — walk, aim,
-mine, and open your inventory simultaneously.
+Both hands, your face, and your head all work **at the same time** — walk, aim, mine, and open your inventory simultaneously.
 
-### 🫲 Left hand — movement (WASD)
+### Left hand — movement (WASD)
 
 | Gesture | Action |
 |---|---|
@@ -57,75 +51,64 @@ mine, and open your inventory simultaneously.
 | Thumb → **ring** | Move left (A) |
 | Thumb → **pinky** | Move back (S) |
 
-Hold two pinches for diagonals (index + middle = forward-right).
+Hold two pinches at once for diagonals (index + middle = forward-right).
 
-### 🫱 Right hand — camera & combat
+### Right hand — camera & combat
 
 | Gesture | Action |
 |---|---|
-| **Move hand across the frame** | Aim camera (mouse look) |
+| **Move hand across the frame** | Aim camera |
 | Thumb → **index** | Attack / mine (left click) |
 | Thumb → **middle** | Place / interact (right click) |
 | Thumb → **ring** | Jump (Space) |
 | Thumb → **pinky** | Swap offhand (F) |
-| ✌️ **Peace sign** (index + middle up, ring + pinky curled) | Recenter camera — see [Common Issues](#-common-issues) |
+| ✌️ **Peace sign** | Recenter camera — see [Common Issues](#common-issues) |
 
-### 😮 Face & head
+Peace sign = index + middle fingers extended, ring + pinky curled.
+
+### Face & head
 
 | Gesture | Action |
 |---|---|
 | Raise eyebrows | Open inventory (E) |
 | Open mouth | Throw item (Q) |
 | Nod head down | Sneak (hold Shift) |
-| Tilt head toward left shoulder | Hotbar next (scroll up) |
-| Tilt head toward right shoulder | Hotbar prev (scroll down) |
+| Tilt head toward left shoulder | Hotbar next |
+| Tilt head toward right shoulder | Hotbar prev |
 
-Want the full reference card in your terminal? Run `mcv gestures`.
+Run `mcv gestures` for the full reference card in your terminal.
 
 ---
 
-## 🛠 Common Issues
+## Common Issues
 
 **1. The camera keeps drifting and I run out of room to aim.**
-Your hand has a limited physical range, so the camera anchor can drift off-center.
-Hold the ✌️ **peace sign** to "lift the mouse": it freezes the camera, lets you
-reposition your hand anywhere comfortable, and resumes aiming from the new spot —
-no snap. This is the intended way to recenter; use it freely.
+Your hand has a limited physical range, so the aim can drift off-center over time.
+Hold the ✌️ **peace sign** to "lift the mouse": it freezes the camera, lets you reposition your hand anywhere comfortable, and resumes aiming from the new spot — no snap. Use it freely whenever you need to recenter.
 
-**2. Black or frozen camera feed (no hand detected).**
-This is almost always a permissions issue, not a bug. macOS silently hands you
-black frames if Camera access isn't granted. Open **System Settings → Privacy &
-Security → Camera**, enable your terminal app (Terminal/iTerm/VS Code), and fully
-restart it. Run `mcv doctor` to confirm.
+**2. Black or frozen camera feed.**
+This is almost always a permissions issue. macOS silently gives you black frames if Camera access isn't granted. Open **System Settings → Privacy & Security → Camera**, enable your terminal app (Terminal/iTerm/VS Code), and fully restart it. Run `mcv doctor` to confirm.
 
 **3. Gestures show in the app but Minecraft doesn't respond.**
-Input injection needs **Accessibility / Input Monitoring** — a *separate* grant
-from Camera. Without it, key/mouse events are dropped with no error. Enable your
-terminal app under **System Settings → Privacy & Security → Accessibility**, then
-restart it. (Also: make sure you clicked **Go Live**, not just opened the app.)
+Input injection needs a separate **Accessibility / Input Monitoring** grant. Without it, key and mouse events are silently dropped. Enable your terminal app under **System Settings → Privacy & Security → Accessibility**, then restart it. Also make sure you clicked **Go Live**, not just opened the app.
 
 **4. It grabbed my iPhone instead of my webcam.**
-macOS Continuity Camera may silently pick your iPhone as camera 0. Pin the right
-device by setting the camera index in `config.yaml`, then relaunch. Run
-`mcv doctor` to list what it's seeing.
+macOS Continuity Camera may silently pick your iPhone as camera 0. Set the correct camera index in `config.yaml` and relaunch. Run `mcv doctor` to see what it's seeing.
 
-**5. The camera look feels laggy or jittery.**
-Look smoothing and sensitivity live in `config.yaml` under `joystick:`. Lower
-`right_sensitivity` if aiming feels twitchy; tune `one_euro_min_cutoff` /
-`one_euro_beta` if it feels mushy when flicking. If the whole app is slow, close
-other camera apps and confirm you're on Apple Silicon (CPU path targets 30 fps).
+**5. The camera look feels laggy or twitchy.**
+Sensitivity and smoothing both live in `config.yaml` under `joystick:`. Lower `right_sensitivity` if aiming feels twitchy; adjust `one_euro_min_cutoff` and `one_euro_beta` if flicks feel sluggish. If the whole app feels slow, close other camera apps and confirm you're on Apple Silicon (the CPU path targets 30 fps).
 
 ---
 
-## 📋 Commands
+## Commands
 
 | Command | Description |
 |---|---|
-| `mcv ui` | Polished desktop app (recommended). Camera on top, compact key grid below. **Pin** keeps it in front of Minecraft (even fullscreen); shrink it short to collapse into a camera-only HUD |
-| `mcv run` | Headless controller (`--input` live, `--no-input` dry-run) |
+| `mcv ui` | Desktop app (recommended). Camera on top, key grid below. **Pin** keeps it floating over fullscreen Minecraft; shrink it short to collapse into a camera-only HUD. |
+| `mcv run` | Headless controller (`--input` for live input, `--no-input` for dry run) |
 | `mcv doctor` | Check camera, permissions, and system health |
 | `mcv analyze <clip>` | Run a recorded clip through the pipeline offline |
-| `mcv bench` | Benchmark tracking-backend latency |
+| `mcv bench` | Benchmark tracking latency |
 | `mcv gestures` | Print the full gesture reference card |
 
 ---
@@ -135,56 +118,23 @@ other camera apps and confirm you're on Apple Silicon (CPU path targets 30 fps).
 > The rest of this README is for the curious — how it's built and why it's safe.
 > You don't need any of it to play.
 
-## 🧠 How it works
+## How it works
 
-Three independent signal streams run concurrently on every camera frame, each
-decoupled so they never block or conflict with one another:
+Three independent streams run on every camera frame without blocking each other:
 
-```mermaid
-flowchart LR
-    CAM[📷 Webcam<br/>AVFoundation] --> MP[MediaPipe<br/>Hands + Face]
-    MP --> LH[Left hand<br/>pinch bitmask]
-    MP --> RH[Right hand<br/>pinch + cursor]
-    MP --> FH[Face + head<br/>blendshapes + roll]
+**Left hand** reads which fingers are pinched and maps them to WASD keys. Pinch distances are normalized by hand size, so the thresholds work whether you're close to or far from the camera. Each pinch has a small engage/release gap built in so keys don't chatter at the threshold.
 
-    LH --> SM[Schmitt-trigger<br/>state machines]
-    RH --> SM
-    RH --> OE[One-Euro<br/>filter]
-    FH --> SM
+**Right hand** does two things at once: the same pinch detection drives combat buttons (attack, place, jump, swap), while the position of your index knuckle drives camera look as a relative mouse delta. A smoothing filter cuts jitter when your hand is still without adding lag when you move fast. The peace-sign "clutch" reseeds the look anchor without snapping the camera — the same way lifting a mouse works.
 
-    SM -->|key down/up| EMIT[InputEmitter]
-    OE -->|relative deltas| EMIT
-    EMIT -->|pynput + Quartz CGEvent| MC[🎮 Minecraft]
-```
+**Face + head** run alongside hand tracking. Raised eyebrows and an open mouth map to inventory and throw. Head tilt drives hotbar scroll. A nod down triggers sneak. These are entirely independent — you can walk, aim, and open your inventory at the same time.
 
-**Pinch bitmask (both hands).** Thumb-to-fingertip distances are computed in one
-vectorized NumPy call and normalized by hand scale, so thresholds stay valid no
-matter how close you are to the camera. Each pinch passes through a **Schmitt-trigger
-hysteresis gate** (`T_engage < T_release`) that swallows threshold jitter — no key
-chatter. Left-hand pinches drive WASD; right-hand pinches drive attack, use, jump,
-and swap-offhand.
+Everything runs on CPU at 30 fps on Apple Silicon — no GPU required.
 
-**Cursor look (right hand).** The index-MCP landmark is tracked frame-to-frame, and
-its deltas pass through a **One-Euro velocity-adaptive filter** (stable at rest,
-snappy in motion) before being emitted as relative mouse moves via Quartz CGEvent.
-The peace-sign clutch reseeds the cursor anchor without moving the camera.
+## Safety
 
-**Face + head.** MediaPipe FaceLandmarker runs alongside hand tracking. Blendshape
-scores feed per-gesture Schmitt triggers (eyebrows → inventory, open mouth → throw);
-the eye-corner angle drives a head-roll detector for hotbar scroll; and a head-pitch
-ratio drives a nod-down detector for sneak.
-
-Everything runs on **CPU at 30 fps on Apple Silicon** — no GPU required. MPS is an
-optional accelerator, never a dependency.
-
-## 🔒 Safety
-
-1. The input emitter is a **no-op by default** — dry-run and tests never move your
-   real mouse or press real keys.
-2. **Tracking loss releases every held key immediately** — no stuck jumps, no
-   infinite sneaking if your hand leaves the frame.
-3. **CPU fallback always works**; MPS acceleration is purely optional.
-4. `T_release > T_engage` strictly for every pinch — asserted in the test suite.
+- The input emitter does nothing by default — dry-run and tests never touch your real mouse or keyboard.
+- If your hand leaves the frame mid-gesture, every held key releases immediately. No stuck jumps, no infinite sneaking.
+- CPU always works; the optional GPU accelerator is never a hard dependency.
 
 ## License
 

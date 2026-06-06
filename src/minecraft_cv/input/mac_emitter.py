@@ -69,6 +69,18 @@ class MacInputEmitter(InputEmitter):
         self._mouse_mod: Any = mouse
         self._quartz: Any = Quartz
         self._last_emit: dict[str, float] = {}
+        # Resolve character keys to virtual key codes once, using the active keyboard layout.
+        # Emitting letters by key code (not character) makes them immune to pynput rewriting
+        # the char to uppercase whenever a Shift modifier is held: while sneak holds Shift,
+        # that rewrite ('w' -> 'W') misses the layout map and collapses *every* WASD key onto
+        # key code 0 (the physical A key). See _resolve_key for the full mechanism.
+        self._char_vk: dict[str, int] = {}
+        try:
+            from pynput._util.darwin import get_unicode_to_keycode_map
+
+            self._char_vk = dict(get_unicode_to_keycode_map())
+        except Exception:  # pragma: no cover - fake/non-macOS backends fall back to from_char
+            self._char_vk = {}
         # Main-display pixel size for normalized absolute-cursor coordinates.
         try:
             main = Quartz.CGMainDisplayID()
@@ -150,7 +162,18 @@ class MacInputEmitter(InputEmitter):
         return False
 
     def _resolve_key(self, key: str) -> Any:
-        """Map a logical keyboard key name to a pynput Key / KeyCode."""
+        """Map a logical keyboard key name to a pynput Key / KeyCode.
+
+        Character keys (``w``, ``a``, ``e`` ...) are resolved to a **virtual key code** via the
+        active keyboard layout and emitted by key code, not by character. Emitting by character
+        routes through pynput's ``Controller._resolve``, which rewrites the char to uppercase
+        whenever a Shift modifier is held — e.g. while sneak holds Shift. The uppercased char
+        (``'W'``) is absent from the layout's unicode->keycode map, so pynput's ``KeyCode._event``
+        falls back to key code 0 (the physical ``A`` key) for *every* letter, collapsing all of
+        WASD onto ``A`` mid-sneak. Resolving to a key code up front sidesteps that rewrite while
+        the event still carries the correct modifier flags. Specials already carry an explicit
+        ``vk`` (e.g. ``Key.space``) and are immune. Unknown chars fall back to ``from_char``.
+        """
         kbd = self._kbd_mod
         specials = {
             "space": kbd.Key.space,
@@ -164,6 +187,9 @@ class MacInputEmitter(InputEmitter):
         }
         if key in specials:
             return specials[key]
+        vk = self._char_vk.get(key)
+        if vk is not None:
+            return kbd.KeyCode.from_vk(vk)
         return kbd.KeyCode.from_char(key)
 
     def _resolve_button(self, key: str) -> Any:
