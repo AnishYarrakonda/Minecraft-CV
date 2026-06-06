@@ -7,10 +7,26 @@
 > **Vanilla Minecraft. No mods, no plugins. Just your webcam.**
 > Your hands walk, mine, build, jump, and aim — in real time, at full speed.
 
-<!--
-  Drop your demo video onto this line directly in the GitHub README editor.
-  GitHub uploads it and replaces this comment with a playable video embed.
--->
+## Demo
+
+<table>
+  <tr>
+    <td><img src="assets/demo/part1.gif" alt="Demo part 1"/></td>
+    <td><img src="assets/demo/part2.gif" alt="Demo part 2"/></td>
+  </tr>
+  <tr>
+    <td><img src="assets/demo/part3.gif" alt="Demo part 3"/></td>
+    <td><img src="assets/demo/part4.gif" alt="Demo part 4"/></td>
+  </tr>
+  <tr>
+    <td><img src="assets/demo/part5.gif" alt="Demo part 5"/></td>
+    <td><img src="assets/demo/part6.gif" alt="Demo part 6"/></td>
+  </tr>
+  <tr>
+    <td><img src="assets/demo/part7.gif" alt="Demo part 7"/></td>
+    <td><img src="assets/demo/part8.gif" alt="Demo part 8"/></td>
+  </tr>
+</table>
 
 ---
 
