@@ -47,8 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print("Usage: mcv <command> [args...]")
         print("\nCommands:")
-        print("  ui         Launch the polished desktop app")
-        print("  overlay    Compact always-on-top overlay for use during gameplay")
+        print("  ui         Launch the polished desktop app (pin + shrink for an in-game HUD)")
         print("  run        Run the live gesture controller (headless / cv2 overlay)")
         print("  analyze    Offline clip analysis")
         print("  bench      Benchmark tracking backend latency")
@@ -61,8 +60,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if cmd == "ui":
         return main_ui(sub_argv)
-    elif cmd == "overlay":
-        return main_overlay(sub_argv)
     elif cmd == "run":
         return main_run(sub_argv)
     elif cmd == "analyze":
@@ -225,40 +222,6 @@ def main_ui(argv: list[str] | None = None) -> int:
 
         source = ClipSource(args.clip)
     return run_app(settings, source=source)
-
-
-# --- mcv overlay --------------------------------------------------------------
-_OVERLAY_INSTALL_HINT = (
-    "[mcv overlay] The overlay needs PySide6, which is not installed.\n"
-    "              Install the project (pulls in PySide6):  pip install -e .\n"
-    "              or just PySide6:                         pip install PySide6"
-)
-
-
-def main_overlay(argv: list[str] | None = None) -> int:
-    """Launch the compact always-on-top overlay window. Defaults to the mode in config."""
-    p = argparse.ArgumentParser(
-        prog="mcv overlay",
-        description="Compact always-on-top overlay for use alongside Minecraft.",
-    )
-    _add_config_arg(p)
-    p.add_argument(
-        "--live", action="store_true", help="enable real OS input on launch (default: dry-run)"
-    )
-    args = p.parse_args(argv)
-
-    overrides: dict[str, Any] = {}
-    if args.live:
-        overrides["input"] = {"enabled": True}
-    settings = _load_settings(args.config, overrides if overrides else None)
-
-    try:
-        from minecraft_cv.ui.overlay import run_overlay
-    except ImportError:
-        print(_OVERLAY_INSTALL_HINT, file=sys.stderr)
-        return 1
-
-    return run_overlay(settings)
 
 
 # --- mcv-analyze --------------------------------------------------------------

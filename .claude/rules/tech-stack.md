@@ -122,23 +122,22 @@ src/minecraft_cv/
 ├── input/          # InputEmitter ABC, NullEmitter, MacInputEmitter (pynput+Quartz)
 │   ├── emitter.py
 │   └── mac_emitter.py
-├── ui/             # PySide6 desktop app (mcv ui / mcv overlay)
-│   ├── app.py          # MainWindow + run_app() entrypoint
-│   ├── overlay.py      # compact always-on-top overlay (run_overlay())
+├── ui/             # PySide6 desktop app (mcv ui) — camera on top, key grid below, pinnable
+│   ├── app.py          # MainWindow (vertical layout + collapse/pin) + run_app() entrypoint
 │   ├── worker.py       # PipelineWorker (pipeline on background thread, signals to Qt)
 │   ├── camera_view.py  # live camera feed widget
-│   ├── panels.py       # HeaderBar (Go Live / Calibrate), KeymapPanel (gesture HUD)
+│   ├── panels.py       # HeaderBar (Go Live / Calibrate / Pin), KeymapPanel (compact key grid)
 │   ├── keymap.py       # per-binding key indicator widgets
 │   ├── skeleton.py     # hand-skeleton overlay on the camera view
-│   ├── macos_window.py # keep_window_in_front(): native NSWindow pin (level/Spaces/no-hide)
-│   ├── widgets.py      # shared reusable Qt widgets
+│   ├── macos_window.py # keep_window_in_front() / reset_window_level(): native NSWindow pin
+│   ├── widgets.py      # shared reusable Qt widgets (KeyCap, FlowLayout, …)
 │   └── theme.py        # zinc dark-mode palette + apply_theme()
 ├── runtime.py      # FrameProcessor: camera/clip loop + face tracker on shared thread
 ├── recovery.py     # per-hand tracking-loss recovery state machine
 ├── pipeline.py     # Pipeline: gestures + joystick → InputEmitter; run_pipeline()
 └── config.py       # pydantic Settings model (all tunable values via config.yaml)
 
-cli.py              # Unified mcv entrypoint + sub-commands (ui, overlay, run, analyze,
+cli.py              # Unified mcv entrypoint + sub-commands (ui, run, analyze,
                     # bench, doctor, gestures)
 tests/              # mirrors src/ structure; gesture SM tests are pure/deterministic
 data/               # clips + annotations (git-ignored; large files go in data/clips/)

@@ -9,6 +9,7 @@ from minecraft_cv.gestures.face_gestures import (
     LEFT_EYE_OUTER,
     RIGHT_EYE_OUTER,
     FaceGestureStateMachine,
+    HeadPitchDetector,
     HeadRollDetector,
 )
 from minecraft_cv.gestures.registry import KEY_DOWN, KEY_UP
@@ -157,3 +158,118 @@ def test_state_machine_runs_head_roll_from_default_config() -> None:
     sm.update(_face_roll(20.0))
     events = _names(sm.update(_face_roll(20.0)))
     assert ("hotbar_next", KEY_DOWN) in events
+
+
+def _face_pitch(ratio: float) -> FaceResult:
+    """FaceResult whose vertical face geometry yields the given head-pitch ratio.
+
+    ratio = (chin_y - nose_y) / (nose_y - nasion_y); it drops when nodding down.
+    """
+    lm = np.full((478, 3), 0.5, dtype=np.float32)
+    nasion_y, nose_y = 0.40, 0.50
+    top = nose_y - nasion_y
+    lm[1] = (0.5, nose_y, 0.0)  # nose
+    lm[168] = (0.5, nasion_y, 0.0)  # nasion
+    lm[152] = (0.5, nose_y + ratio * top, 0.0)  # chin
+    return FaceResult(blendshapes={}, landmarks=lm)
+
+
+def _pitch_det() -> HeadPitchDetector:
+    return HeadPitchDetector(
+        "sneak",
+        engage_ratio=0.85,
+        release_ratio=0.92,
+        engage_frames=3,
+        release_frames=2,
+        warmup_frames=4,
+        neutral_alpha=0.02,
+    )
+
+
+def test_head_pitch_neutral_not_triggered_by_transient_look_up() -> None:
+    """A brief glance up must not ratchet the neutral and spuriously fire sneak.
+
+    Regression: the old asymmetric baseline chased the head-up pose, so returning
+    to the *same* neutral pose later read as a nod and engaged sneak.
+    """
+    det = _pitch_det()
+    for _ in range(4):  # warmup at neutral
+        assert det.update(_face_pitch(1.0)) == []
+    for _ in range(3):  # brief glance up at the screen
+        det.update(_face_pitch(1.3))
+    fired: list = []
+    for _ in range(6):  # back to the original neutral pose
+        fired += det.update(_face_pitch(1.0))
+    assert _names(fired) == set()
+
+
+def test_head_pitch_engages_on_real_nod_and_releases() -> None:
+    det = _pitch_det()
+    for _ in range(4):
+        det.update(_face_pitch(1.0))
+    fired: list = []
+    for _ in range(3):
+        fired += det.update(_face_pitch(0.7))
+    assert _names(fired) == {("sneak", KEY_DOWN)}
+    rel: list = []
+    for _ in range(2):
+        rel += det.update(_face_pitch(1.0))
+    assert _names(rel) == {("sneak", KEY_UP)}
+
+
+def test_head_pitch_warmup_median_ignores_outlier_first_frame() -> None:
+    """A non-neutral startup frame must not poison the session baseline."""
+    det = _pitch_det()
+    det.update(_face_pitch(0.6))  # outlier: mid-nod at startup
+    for _ in range(3):
+        det.update(_face_pitch(1.0))  # rest of warmup at neutral
+    fired: list = []
+    for _ in range(6):
+        fired += det.update(_face_pitch(1.0))
+    assert _names(fired) == set()
+
+
+def test_throw_item_smile_requires_both_corners() -> None:
+    """A symmetric smile fires Q; a one-sided smirk must not (combine='min')."""
+    settings = {
+        "throw_item": FaceGestureDetectorSettings(
+            blendshape="mouthSmileLeft",
+            secondary_blendshape="mouthSmileRight",
+            combine="min",
+            t_engage=0.5,
+            t_release=0.3,
+            engage_frames=2,
+            release_frames=2,
+        )
+    }
+    sm = FaceGestureStateMachine(settings)
+    # One-sided smile (only the left corner) stays below threshold -> never fires.
+    for _ in range(5):
+        assert sm.update(FaceResult({"mouthSmileLeft": 0.9, "mouthSmileRight": 0.1})) == []
+    # Both corners up -> fires after engage_frames.
+    assert sm.update(FaceResult({"mouthSmileLeft": 0.8, "mouthSmileRight": 0.8})) == []
+    ev = sm.update(FaceResult({"mouthSmileLeft": 0.8, "mouthSmileRight": 0.8}))
+    assert _names(ev) == {("throw_item", KEY_DOWN)}
+
+
+def test_sneak_open_mouth_holds_and_releases() -> None:
+    """Open mouth (jawOpen) holds Shift; closing the mouth releases it."""
+    settings = {
+        "sneak": FaceGestureDetectorSettings(
+            blendshape="jawOpen",
+            t_engage=0.5,
+            t_release=0.3,
+            engage_frames=3,
+            release_frames=2,
+        )
+    }
+    sm = FaceGestureStateMachine(settings)
+    fired: list = []
+    for _ in range(3):
+        fired += sm.update(FaceResult({"jawOpen": 0.8}))
+    assert _names(fired) == {("sneak", KEY_DOWN)}
+    assert sm.update(FaceResult({"jawOpen": 0.8})) == []  # held while mouth stays open
+    rel: list = []
+    for _ in range(2):
+        rel += sm.update(FaceResult({"jawOpen": 0.1}))
+    assert _names(rel) == {("sneak", KEY_UP)}

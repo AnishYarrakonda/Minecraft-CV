@@ -20,10 +20,11 @@ def test_build_keymap_covers_all_bound_gestures() -> None:
     assert rows[("right", "inventory")].key == "E"
     assert rows[("right", "swap_offhand")].key == "F"
 
-    # Face gestures + head-roll scroll specials + nod.
+    # Face gestures + head-roll scroll specials.
     assert rows[("face", "sneak")].key == "Shift"
-    assert rows[("face", "sneak")].finger == "Nod down"
+    assert rows[("face", "sneak")].finger == "Open mouth"
     assert rows[("face", "throw_item")].key == "Q"
+    assert rows[("face", "throw_item")].finger == "Smile"
     assert rows[("face", "jump")].key == "Space"
     assert rows[("face", "hotbar_next")].key == "Scroll ↑"
     assert rows[("face", "hotbar_prev")].key == "Scroll ↓"

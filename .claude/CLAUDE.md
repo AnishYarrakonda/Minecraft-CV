@@ -10,11 +10,10 @@ gestures to game input, and emits OS-level events via pynput / Quartz CGEvent.
 # Setup (if needed; .venv already exists)
 source .venv/bin/activate
 
-# Desktop app (recommended — Go Live toggle, Calibrate button, live HUD)
+# Desktop app (recommended — Go Live toggle, Calibrate button, live HUD).
+# Camera on top, compact key grid below; Pin keeps it over Minecraft, shrink it
+# short to collapse into a camera-only HUD.
 .venv/bin/python -m minecraft_cv.cli ui
-
-# Compact always-on-top overlay (for use alongside Minecraft)
-.venv/bin/python -m minecraft_cv.cli overlay --live
 
 # Dry run with camera and debug overlay (headless, no UI)
 .venv/bin/python -m minecraft_cv.cli run --no-input --debug-overlay
@@ -54,11 +53,11 @@ src/minecraft_cv/
 ├── gestures/       # Schmitt triggers, pinch/extension detectors, face gestures, safety
 ├── joystick/       # ScreenJoystick, WristTiltJoystick, One-Euro filter
 ├── input/          # InputEmitter ABC, NullEmitter, MacInputEmitter
-├── ui/             # PySide6 desktop app + overlay + Qt/pipeline bridge
+├── ui/             # PySide6 desktop app (pinnable, collapsible) + Qt/pipeline bridge
 ├── runtime.py      # FrameProcessor: camera/clip loop
 ├── pipeline.py     # Pipeline: gestures + joystick → InputEmitter
 └── config.py       # pydantic Settings (all tunable values via config.yaml)
-cli.py              # mcv entrypoint (ui, overlay, run, analyze, bench, doctor, gestures)
+cli.py              # mcv entrypoint (ui, run, analyze, bench, doctor, gestures)
 tests/              # mirrors src/; gesture SM tests are pure/deterministic
 ```
 
@@ -73,5 +72,5 @@ for areas you're not touching.
 | Mouse look, camera sensitivity, `ScreenJoystick`, `WristTiltJoystick`, One-Euro filter, cursor reseeding, peace-sign clutch | `.claude/rules/mouse-look.md` |
 | Camera capture, OpenCV preprocessing, NumPy vectorization, MPS/PyTorch inference, frame-rate/latency, macOS camera permissions | `.claude/rules/opencv-pytorch.md` |
 | Input emission — `pynput`, Quartz CGEvent, `InputEmitter`/`MacInputEmitter`, keyboard hold vs tap, scroll, Accessibility permissions | `.claude/rules/input-layer.md` |
-| PySide6 UI, overlay, `PipelineWorker`, Qt threading, window pinning, `MainWindow`, `CameraView`, `KeymapPanel` | `.claude/rules/ui-qt.md` |
+| PySide6 UI, `PipelineWorker`, Qt threading, window pinning / collapse, `MainWindow`, `CameraView`, `KeymapPanel` | `.claude/rules/ui-qt.md` |
 | Adding/removing dependencies, MediaPipe landmarks, architecture overview, code style, config system | `.claude/rules/tech-stack.md` |

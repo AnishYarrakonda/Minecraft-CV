@@ -1,4 +1,4 @@
-"""Sidebar panels: header controls and the live keymap.
+"""Panels: header controls and the live key grid (shown under the camera).
 
 These read a :class:`~minecraft_cv.pipeline.StepResult` each frame and update lightweight
 custom widgets; nothing here touches the OS or the pipeline directly (the window wires the
@@ -9,9 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
@@ -22,11 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 from minecraft_cv.ui import theme
-from minecraft_cv.ui.keymap import build_keymap
+from minecraft_cv.ui.keymap import KeyRow, build_keymap
 from minecraft_cv.ui.widgets import (
-    Card,
+    FlowLayout,
     HealthChip,
-    IndicatorDot,
     KeyCap,
     StatusPill,
 )
@@ -44,7 +42,12 @@ def _restyle(widget: QWidget) -> None:
 
 
 class HeaderBar(QWidget):
-    """Top bar: title, status pill, per-hand health chips, and the control buttons."""
+    """Compact control bar (status pill, per-hand chips, action buttons) shown at the bottom.
+
+    Lays out with a :class:`FlowLayout` so the chips + buttons wrap to extra rows instead of
+    squishing/truncating in a narrow window. (Named ``HeaderBar`` for history; it now lives at
+    the bottom of the window, below the camera and key grid.)
+    """
 
     startStopClicked = Signal()
     liveToggled = Signal(bool)
@@ -52,24 +55,20 @@ class HeaderBar(QWidget):
     pinToggled = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        """Build the header bar in stopped, Dry-Run, unpinned state."""
+        """Build the control bar in stopped, Dry-Run, unpinned state."""
         super().__init__(parent)
         self.setObjectName("HeaderBar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedHeight(60)
+        # Let the wrapped (multi-row) height propagate to the parent layout.
+        policy = self.sizePolicy()
+        policy.setHeightForWidth(True)
+        policy.setVerticalPolicy(QSizePolicy.Policy.Minimum)
+        self.setSizePolicy(policy)
         self._running = False
         self._live = False
         self._pinned = False
 
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(18, 0, 14, 0)
-        lay.setSpacing(12)
-
-        title = QLabel(f'<span style="color:{theme.ACCENT}">●</span> minecraft_cv')
-        title.setObjectName("HeaderTitle")
-        title.setTextFormat(Qt.TextFormat.RichText)
-        lay.addWidget(title)
-        lay.addSpacing(8)
+        lay = FlowLayout(self, margin=0, h_spacing=8, v_spacing=8)
 
         self._pill = StatusPill()
         lay.addWidget(self._pill)
@@ -79,8 +78,6 @@ class HeaderBar(QWidget):
         lay.addWidget(self._chip_l)
         lay.addWidget(self._chip_r)
         lay.addWidget(self._chip_f)
-
-        lay.addStretch(1)
 
         self._start_btn = QPushButton("Start")
         self._start_btn.setObjectName("PrimaryButton")
@@ -133,46 +130,28 @@ class HeaderBar(QWidget):
         _restyle(self._live_btn)
 
 
-class _KeymapRow(QWidget):
-    """One keymap row: indicator dot, name + finger, and the key-cap."""
-
-    def __init__(self, name: str, finger: str, key: str, accent: str) -> None:
-        super().__init__()
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
-        self.dot = IndicatorDot(accent)
-        lay.addWidget(self.dot)
-        text = QVBoxLayout()
-        text.setContentsMargins(0, 0, 0, 0)
-        text.setSpacing(0)
-        name_lbl = QLabel(name)
-        name_lbl.setObjectName("RowName")
-        text.addWidget(name_lbl)
-        if finger:
-            finger_lbl = QLabel(f"{finger} pinch")
-            finger_lbl.setObjectName("RowFinger")
-            text.addWidget(finger_lbl)
-        lay.addLayout(text)
-        lay.addStretch(1)
-        self.cap = KeyCap(key, accent)
-        lay.addWidget(self.cap)
-
-    def set_active(self, active: bool) -> None:
-        self.dot.setActive(active)
-        self.cap.setActive(active)
-
-
 class KeymapPanel(QWidget):
-    """Two cards listing every bound gesture, lit live as gestures fire."""
+    """A compact key-cap grid (grouped MOVE / COMBAT / FACE) that lights live as gestures fire.
+
+    Lives directly under the camera in the vertical layout. Caps wrap via :class:`FlowLayout`
+    so they stay readable in a narrow window; the mouse-sensitivity slider sits below the grid.
+    """
 
     sensitivityChanged = Signal(float)
-    sneakSensitivityChanged = Signal(int)
+
+    _SECTION_TITLES = {"left": "MOVE", "right": "COMBAT", "face": "FACE"}
+    _SECTION_ORDER = ("left", "right", "face")
 
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         """Build the keymap from ``settings`` (bindings + gesture config)."""
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        # Preferred (not Expanding) vertically with height-for-width: take the real wrapped
+        # content height when the window is tall, and scroll (via the inner QScrollArea) when
+        # squeezed shorter. heightForWidth avoids FlowLayout's sizeHint over-estimating the
+        # height (it otherwise assumes every cap stacks in its own row).
+        policy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         main_lay = QVBoxLayout(self)
         main_lay.setContentsMargins(0, 0, 0, 0)
         main_lay.setSpacing(0)
@@ -209,84 +188,98 @@ class KeymapPanel(QWidget):
 
         content = QWidget()
         content.setObjectName("KeymapScrollContent")
+        self._content = content
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(0, 0, 6, 0)
-        lay.setSpacing(10)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
 
-        self._rows: dict[tuple[str, str], _KeymapRow] = {}
-
-        cards = {
-            "left": Card("LEFT HAND  ·  ACTIONS"),
-            "right": Card("RIGHT HAND  ·  COMBAT"),
-            "face": Card("FACE GESTURES"),
-        }
+        self._caps: dict[tuple[str, str], KeyCap] = {}
         accents = {"left": theme.MOVE, "right": theme.LOOK, "face": theme.ACCENT}
-        for row in build_keymap(settings):
-            widget = _KeymapRow(row.name, row.finger, row.key, accents[row.hand])
-            self._rows[(row.hand, row.gesture)] = widget
-            cards[row.hand].add(widget)
-        lay.addWidget(cards["left"])
-        lay.addWidget(cards["right"])
-        lay.addWidget(cards["face"])
 
-        # Sensitivity slider
+        grouped: dict[str, list[KeyRow]] = {hand: [] for hand in self._SECTION_ORDER}
+        for row in build_keymap(settings):
+            grouped.setdefault(row.hand, []).append(row)
+
+        for hand in self._SECTION_ORDER:
+            rows = grouped.get(hand) or []
+            if not rows:
+                continue
+            label = QLabel(self._SECTION_TITLES.get(hand, hand.upper()))
+            label.setObjectName("CardTitle")
+            lay.addWidget(label)
+            lay.addWidget(self._build_flow(rows, accents[hand]))
+
+        # Mouse sensitivity, directly under the controls.
         self._base_sensitivity = settings.joystick.right_sensitivity
-        sens_card = Card("MOUSE SENSITIVITY")
+        sens_label = QLabel("MOUSE SENSITIVITY")
+        sens_label.setObjectName("CardTitle")
+        lay.addSpacing(4)
+        lay.addWidget(sens_label)
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setMinimum(1)
         self.slider.setMaximum(100)
         self.slider.setValue(10)
         self.slider.valueChanged.connect(self._on_slider)
+        lay.addWidget(self.slider)
         self.slider_label = QLabel("1.00x")
         self.slider_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sens_card.add(self.slider)
-        sens_card.add(self.slider_label)
-
-        # Sneak Sensitivity slider
-        self.sneak_slider = QSlider(Qt.Orientation.Horizontal)
-        self.sneak_slider.setMinimum(1)
-        self.sneak_slider.setMaximum(100)
-
-        # Calculate initial value from config: engage = 0.50 + (val/100) * 0.49
-        # => val = (engage - 0.50) / 0.49 * 100
-        initial_engage = settings.gestures.head_pitch.engage_ratio if settings.gestures.head_pitch else 0.85
-        initial_val = int(round((initial_engage - 0.50) / 0.49 * 100.0))
-        initial_val = max(1, min(100, initial_val))
-
-        self.sneak_slider.setValue(initial_val)
-        self.sneak_slider.valueChanged.connect(self._on_sneak_slider)
-        self.sneak_slider_label = QLabel(f"{initial_val}%")
-        self.sneak_slider_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sens_card.add(QLabel("SNEAK SENSITIVITY"))
-        sens_card.add(self.sneak_slider)
-        sens_card.add(self.sneak_slider_label)
-
-        lay.addWidget(sens_card)
+        lay.addWidget(self.slider_label)
 
         lay.addStretch(1)
 
         scroll.setWidget(content)
         main_lay.addWidget(scroll)
 
+    def _build_flow(self, rows: list[KeyRow], accent: str) -> QWidget:
+        """Return a host widget holding the section's key-caps in a wrapping flow layout.
+
+        Each cap shows its key label and lights with ``accent`` when its gesture is held; the
+        gesture name + finger is exposed as a tooltip so the compact grid stays uncluttered.
+        """
+        host = QWidget()
+        # Let the wrapping height propagate to the parent QVBoxLayout.
+        policy = host.sizePolicy()
+        policy.setHeightForWidth(True)
+        policy.setVerticalPolicy(QSizePolicy.Policy.Minimum)
+        host.setSizePolicy(policy)
+        flow = FlowLayout(host, margin=0, h_spacing=6, v_spacing=6)
+        for row in rows:
+            cap = KeyCap(row.key, accent)
+            tip = row.name + (f"  ·  {row.finger}" if row.finger else "")
+            cap.setToolTip(tip)
+            self._caps[(row.hand, row.gesture)] = cap
+            flow.addWidget(cap)
+        return host
+
     def _on_slider(self, val: int) -> None:
         mult = val / 10.0
         self.slider_label.setText(f"{mult:.2f}x")
         self.sensitivityChanged.emit(self._base_sensitivity * mult)
 
-    def _on_sneak_slider(self, val: int) -> None:
-        self.sneak_slider_label.setText(f"{val}%")
-        self.sneakSensitivityChanged.emit(val)
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt override name
+        """Height depends on width: caps wrap, so the parent must use the wrapped height."""
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt override name
+        """Return the grid's height at ``width`` px (caps laid out, typically 1 row per section)."""
+        h = self._content.heightForWidth(width)
+        return h if h >= 0 else self._content.sizeHint().height()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt override name
+        """Preferred size; height is the wrapped content height at the current width."""
+        w = self.width() if self.width() > 0 else 320
+        return QSize(self._content.sizeHint().width(), self.heightForWidth(w))
 
     def update_state(self, step: StepResult) -> None:
-        """Light each row whose gesture is currently held."""
-        for (hand, gesture), widget in self._rows.items():
+        """Light each key-cap whose gesture is currently held."""
+        for (hand, gesture), cap in self._caps.items():
             if hand == "left":
                 held = step.left_gestures
             elif hand == "right":
                 held = step.right_gestures
             else:
                 held = step.face_gestures
-            widget.set_active(gesture in held)
+            cap.setActive(gesture in held)
 
 
 __all__ = ["HeaderBar", "KeymapPanel"]

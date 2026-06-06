@@ -6,7 +6,7 @@ camera frame rate stays cheap (no per-frame stylesheet re-polishing).
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -14,7 +14,15 @@ from PySide6.QtGui import (
     QPainter,
     QPen,
 )
-from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QLabel,
+    QLayout,
+    QLayoutItem,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from minecraft_cv.ui import theme
 
@@ -295,6 +303,115 @@ class Card(QFrame):
         self.body.addWidget(widget)
 
 
+class FlowLayout(QLayout):
+    """A layout that lays children left-to-right and wraps to a new line when out of width.
+
+    Used for the compact key-cap grid so caps reflow gracefully in a narrow window instead of
+    clipping. Standard Qt "flow layout" implementation with fixed horizontal/vertical spacing.
+    """
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        margin: int = 0,
+        h_spacing: int = 6,
+        v_spacing: int = 6,
+    ) -> None:
+        """Create the flow layout.
+
+        Args:
+            parent: Optional parent widget the layout is installed on.
+            margin: Uniform content margin in pixels.
+            h_spacing: Horizontal gap between items in pixels.
+            v_spacing: Vertical gap between wrapped rows in pixels.
+        """
+        super().__init__(parent)
+        self._items: list[QLayoutItem] = []
+        self._h_space = h_spacing
+        self._v_space = v_spacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item: QLayoutItem) -> None:  # noqa: N802 - Qt override name
+        """Append a layout item (called by Qt when widgets are added)."""
+        self._items.append(item)
+
+    def count(self) -> int:
+        """Return the number of items in the layout."""
+        return len(self._items)
+
+    def itemAt(self, index: int) -> QLayoutItem | None:  # noqa: N802 - Qt override name
+        """Return the item at ``index`` or ``None`` if out of range."""
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index: int) -> QLayoutItem | None:  # noqa: N802 - Qt override name
+        """Remove and return the item at ``index`` or ``None`` if out of range."""
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self) -> Qt.Orientation:  # noqa: N802 - Qt override name
+        """The layout does not expand in any direction on its own."""
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt override name
+        """Height depends on width (items wrap), so this is ``True``."""
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt override name
+        """Return the total height needed to lay out all items within ``width`` pixels."""
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802 - Qt override name
+        """Position child items within ``rect``, wrapping as needed."""
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt override name
+        """Return the minimum useful size."""
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:  # noqa: N802 - Qt override name
+        """Return a size large enough for the widest single item plus margins."""
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(
+            margins.left() + margins.right(), margins.top() + margins.bottom()
+        )
+        return size
+
+    def _do_layout(self, rect: QRect, test_only: bool) -> int:
+        """Place items row by row; return the resulting total height in pixels.
+
+        Args:
+            rect: The area to lay out within (widget coordinates, pixels).
+            test_only: When ``True``, only measure (used by ``heightForWidth``); do not move items.
+        """
+        margins = self.contentsMargins()
+        effective = rect.adjusted(
+            margins.left(), margins.top(), -margins.right(), -margins.bottom()
+        )
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+        for item in self._items:
+            item_size = item.sizeHint()
+            next_x = x + item_size.width() + self._h_space
+            if next_x - self._h_space > effective.right() and line_height > 0:
+                x = effective.x()
+                y = y + line_height + self._v_space
+                next_x = x + item_size.width() + self._h_space
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item_size))
+            x = next_x
+            line_height = max(line_height, item_size.height())
+        return y + line_height - rect.y() + margins.bottom()
+
+
 __all__ = [
-    "Card", "HealthChip", "IndicatorDot", "JoystickGizmo", "KeyCap", "StatusPill",
+    "Card", "FlowLayout", "HealthChip", "IndicatorDot", "JoystickGizmo", "KeyCap", "StatusPill",
 ]

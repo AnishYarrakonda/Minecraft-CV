@@ -33,7 +33,7 @@ def test_defaults_construct_without_yaml() -> None:
         "move_right",
     }
     assert set(s.gestures.right_hand) == {"attack", "use", "inventory", "recenter", "swap_offhand"}
-    assert set(s.gestures.face) == {"jump", "throw_item"}
+    assert set(s.gestures.face) == {"jump", "throw_item", "sneak"}
     assert s.gestures.head_tilt.enabled is True
 
     # Check new bindings exist

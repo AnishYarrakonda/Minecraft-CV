@@ -1,8 +1,9 @@
 """Application bootstrap and the main window assembly.
 
-``run_app`` is the entry point used by both ``mcv ui`` and ``python main.py``. It wires the
-camera "painting" (:class:`CameraView`) and the sidebar "frame" (header + keymap + movement) to
-a :class:`PipelineWorker` running on its own thread, defaulting to safe Dry-Run.
+``run_app`` is the entry point used by both ``mcv ui`` and ``python main.py``. It stacks the
+camera "painting" (:class:`CameraView`) on top of the compact key grid (:class:`KeymapPanel`),
+with the header above, and wires them to a :class:`PipelineWorker` running on its own thread,
+defaulting to safe Dry-Run.
 
 Importing this module requires PySide6; callers that want to degrade gracefully when it is
 absent (the CLI) should guard the import and surface an install hint.
@@ -17,7 +18,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QHBoxLayout,
     QMainWindow,
     QMessageBox,
     QVBoxLayout,
@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (
 )
 
 from minecraft_cv.runtime import FrameProcessor
-from minecraft_cv.ui import theme
 from minecraft_cv.ui.camera_view import CameraView
+from minecraft_cv.ui.macos_window import keep_window_in_front, reset_window_level
 from minecraft_cv.ui.panels import HeaderBar, KeymapPanel
 from minecraft_cv.ui.theme import apply_theme
 from minecraft_cv.ui.worker import PipelineWorker
@@ -35,6 +35,10 @@ if TYPE_CHECKING:
     from minecraft_cv.capture.source import FrameSource
     from minecraft_cv.config import Settings
     from minecraft_cv.runtime import FramePacket
+
+# Below this window height (px), the key grid + sensitivity slider hide, leaving the header
+# bar and camera only — the window collapses into a compact in-game HUD.
+_COLLAPSE_HEIGHT = 460
 
 
 def run_app(settings: Settings, source: FrameSource | None = None) -> int:
@@ -55,7 +59,7 @@ def run_app(settings: Settings, source: FrameSource | None = None) -> int:
 
 
 class MainWindow(QMainWindow):
-    """The framed application: header controls, camera painting, and live HUD sidebar."""
+    """The framed application: header controls above the camera painting and the live key grid."""
 
     def __init__(self, settings: Settings, source: FrameSource | None = None) -> None:
         """Assemble the window and auto-start the capture session in Dry-Run."""
@@ -65,37 +69,35 @@ class MainWindow(QMainWindow):
         self._thread: threading.Thread | None = None
         self._worker: PipelineWorker | None = None
 
+        # Narrow + tall by default to save horizontal space alongside Minecraft; the minimum
+        # is small enough to shrink into a camera-only HUD (the key grid hides below
+        # ``_COLLAPSE_HEIGHT``).
         self.setWindowTitle("minecraft_cv")
-        self.resize(1180, 720)
-        self.setMinimumSize(940, 600)
+        self.resize(480, 710)
+        self.setMinimumSize(320, 240)
+        self._pinned = False
 
         root = QWidget()
         root.setObjectName("Root")
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(10)
 
+        # Aspect-locked camera on top: its height follows its width, so the feed fills the
+        # widget (no black letterbox bands) and a vertical resize never shrinks it.
+        self._camera = CameraView(settings.tracking.swap_handedness)
+        outer.addWidget(self._camera)
+
+        # Compact key grid sits directly under the camera and fills the space down to the
+        # control bar. Extra height shows as empty panel below it (drag the window shorter to
+        # compact); when squeezed it scrolls — the aspect-locked camera never shrinks for it.
+        self._keymap = KeymapPanel(settings)
+        outer.addWidget(self._keymap)
+
+        # Status + Start/Live/Calibrate/Pin moved to the bottom; wraps to fit narrow widths.
         self._header = HeaderBar()
         outer.addWidget(self._header)
 
-        body = QWidget()
-        body_lay = QHBoxLayout(body)
-        body_lay.setContentsMargins(16, 16, 16, 16)
-        body_lay.setSpacing(16)
-
-        self._camera = CameraView(settings.tracking.swap_handedness)
-        body_lay.addWidget(self._camera, stretch=1)
-
-        sidebar = QWidget()
-        sidebar.setFixedWidth(theme.SIDEBAR_WIDTH)
-        side_lay = QVBoxLayout(sidebar)
-        side_lay.setContentsMargins(0, 0, 0, 0)
-        side_lay.setSpacing(0)
-        self._keymap = KeymapPanel(settings)
-        side_lay.addWidget(self._keymap, stretch=1)
-        body_lay.addWidget(sidebar)
-
-        outer.addWidget(body, stretch=1)
         self.setCentralWidget(root)
 
         self._header.startStopClicked.connect(self._toggle_session)
@@ -103,7 +105,6 @@ class MainWindow(QMainWindow):
         self._header.calibrateClicked.connect(self._on_calibrate)
         self._header.pinToggled.connect(self._on_pin)
         self._keymap.sensitivityChanged.connect(self._on_sensitivity_changed)
-        self._keymap.sneakSensitivityChanged.connect(self._on_sneak_sensitivity_changed)
 
         self._start_session()
 
@@ -175,16 +176,22 @@ class MainWindow(QMainWindow):
             self._worker.request_recenter()
 
     def _on_pin(self, pinned: bool) -> None:
+        """Pin/unpin the window above other apps, including fullscreen Minecraft.
+
+        Replaces the standalone overlay: a cross-platform ``WindowStaysOnTopHint`` plus a native
+        macOS window level (``keep_window_in_front``) so it floats over fullscreen Spaces.
+        """
+        self._pinned = pinned
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, pinned)
         self.show()  # re-show is required after changing window flags
+        if pinned:
+            keep_window_in_front(self)
+        else:
+            reset_window_level(self)
 
     def _on_sensitivity_changed(self, val: float) -> None:
         if self._worker is not None:
             self._worker.request_sensitivity(val)
-
-    def _on_sneak_sensitivity_changed(self, val: int) -> None:
-        if self._worker is not None:
-            self._worker.request_sneak_sensitivity(val)
 
     # --- signals from the worker --------------------------------------------
     def _on_frame(self, packet: FramePacket) -> None:
@@ -195,6 +202,12 @@ class MainWindow(QMainWindow):
 
     def _on_error(self, message: str) -> None:
         QMessageBox.warning(self, "minecraft_cv", message)
+
+    # --- responsive collapse ------------------------------------------------
+    def resizeEvent(self, event: object) -> None:  # noqa: N802 - Qt override name
+        """Hide the key grid below ``_COLLAPSE_HEIGHT`` so the window becomes a camera-only HUD."""
+        super().resizeEvent(event)  # type: ignore[arg-type]
+        self._keymap.setVisible(self.height() >= _COLLAPSE_HEIGHT)
 
     # --- teardown -----------------------------------------------------------
     def closeEvent(self, event: object) -> None:  # noqa: N802 - Qt override name

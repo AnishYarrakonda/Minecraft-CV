@@ -1,7 +1,7 @@
 """The camera "painting": a clean live feed with a subtle glowing hand skeleton.
 
-No HUD panels are drawn over the feed (those live in the sidebar); only the hand skeleton,
-rounded framing, and a small unobtrusive mode/FPS badge appear here.
+No HUD panels are drawn over the feed (those live in the key grid below the camera); only the
+hand skeleton, rounded framing, and a small unobtrusive mode/FPS badge appear here.
 """
 
 from __future__ import annotations
@@ -60,14 +60,31 @@ class CameraView(QWidget):
         self._face: object | None = None
         self._live = False
         self._fps = 0.0
-        self.setMinimumSize(480, 360)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._aspect = 4 / 3  # feed width / height; updated from the first frame
+        # Aspect-locked: the widget's height follows its width (heightForWidth), so the feed
+        # fills it with no black letterbox bands and a vertical resize never shrinks the camera.
+        self.setMinimumSize(160, 120)
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt override name
+        """The widget's height is derived from its width (aspect-locked feed)."""
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt override name
+        """Return the height that preserves the feed's aspect ratio at ``width`` pixels."""
+        return round(width / self._aspect) if self._aspect > 0 else width
 
     def set_packet(self, packet: FramePacket) -> None:
         """Store the newest processed frame + hands and schedule a repaint."""
         frame = packet.frame
         h, w = frame.shape[:2]
+        aspect = w / h if h else self._aspect
+        if abs(aspect - self._aspect) > 1e-3:
+            self._aspect = aspect
+            self.updateGeometry()  # re-run the layout so the widget matches the feed aspect
         img = QImage(frame.data, w, h, frame.strides[0], QImage.Format.Format_BGR888)
         self._pixmap = QPixmap.fromImage(img)
         self._frame_ref = frame

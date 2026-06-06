@@ -35,7 +35,6 @@ MONO_FONTS = '"SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace'
 # --- Geometry ----------------------------------------------------------------
 RADIUS_CARD = 8
 RADIUS_CAP = 6
-SIDEBAR_WIDTH = 260
 
 
 def color(hex_str: str, alpha: int = 255) -> QColor:
@@ -73,8 +72,9 @@ def _stylesheet() -> str:
         font-weight: 600;
     }}
     #HeaderBar {{
-        background: {BG};
-        border-bottom: 1px solid {BORDER};
+        background: transparent;
+        border-top: 1px solid {BORDER};
+        padding-top: 8px;
     }}
     #RowName {{ color: {TEXT}; font-size: 12px; font-weight: 500; }}
     #RowFinger {{ color: {FAINT}; font-size: 11px; }}
@@ -141,5 +141,5 @@ def apply_theme(app: QApplication) -> None:
 __all__ = [
     "ACCENT", "BG", "BG_ELEV", "BORDER", "BORDER_HI", "FAINT", "IDLE", "LIVE", "LOOK",
     "MONO_FONTS", "MOVE", "MUTED", "PANEL", "PANEL_HI", "RADIUS_CAP", "RADIUS_CARD",
-    "SIDEBAR_WIDTH", "TEXT", "UI_FONTS", "WARN", "apply_theme", "color",
+    "TEXT", "UI_FONTS", "WARN", "apply_theme", "color",
 ]

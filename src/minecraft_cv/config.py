@@ -307,6 +307,12 @@ class FaceGestureDetectorSettings(BaseModel):
     model_config = {"extra": "forbid"}
 
     blendshape: str
+    secondary_blendshape: str | None = None
+    """Optional second blendshape. When set, the signal combines both sides (see ``combine``)
+    so the gesture only fires when the face is symmetric (e.g. mouthSmileLeft + Right)."""
+    combine: Literal["min", "mean"] = "min"
+    """How to fuse ``blendshape`` and ``secondary_blendshape``. ``min`` requires *both* sides
+    above threshold (enforces symmetry); ``mean`` averages them."""
     t_engage: float = Field(default=0.5, gt=0.0, le=1.0)
     t_release: float = Field(default=0.3, gt=0.0, le=1.0)
     engage_frames: int = Field(default=3, ge=1)
@@ -330,10 +336,19 @@ def _default_face_gestures() -> dict[str, FaceGestureDetectorSettings]:
             t_release=0.3,
             engage_frames=3,
         ),
+        "sneak": FaceGestureDetectorSettings(
+            blendshape="jawOpen",  # open mouth (held) -> shift; closing the mouth releases it
+            t_engage=0.5,
+            t_release=0.3,
+            engage_frames=3,
+            release_frames=2,
+        ),
         "throw_item": FaceGestureDetectorSettings(
-            blendshape="jawOpen",  # jawOpen is the actual mediapipe blendshape name for mouth open
-            t_engage=0.6,
-            t_release=0.35,
+            blendshape="mouthSmileLeft",  # big symmetric smile -> Q
+            secondary_blendshape="mouthSmileRight",
+            combine="min",  # both corners required -> a one-sided smirk won't fire
+            t_engage=0.5,
+            t_release=0.3,
             engage_frames=2,
         ),
     }
@@ -377,12 +392,18 @@ class HeadPitchGestureSettings(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    enabled: bool = True
+    # Disabled by default: sneak is now driven by the open-mouth (jawOpen) face gesture, which
+    # is steadier than head-nod pitch. Re-enable this to use head-nod sneak instead.
+    enabled: bool = False
     gesture: str = "sneak"
     engage_ratio: float = Field(default=0.85, gt=0.0)
     release_ratio: float = Field(default=0.92, gt=0.0)
     engage_frames: int = Field(default=3, ge=1)
     release_frames: int = Field(default=2, ge=1)
+    warmup_frames: int = Field(default=12, ge=1)
+    """Frames whose median seeds the neutral pose at startup (robust to a stray frame)."""
+    neutral_alpha: float = Field(default=0.02, ge=0.0, lt=1.0)
+    """Slow symmetric EMA that tracks the true rest pose without ratcheting the engage point."""
 
     @model_validator(mode="after")
     def _check_hysteresis(self) -> HeadPitchGestureSettings:

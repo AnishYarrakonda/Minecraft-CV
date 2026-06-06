@@ -656,8 +656,8 @@ _STATUS_LABEL: dict[HandStatus, str] = {
 # The first column shows face/head-roll gestures; the second shows the right hand.
 _FACE_COMMANDS = (
     ("Throw", "throw_item"),
+    ("Sneak", "sneak"),
     ("Inventory", "inventory"),
-    ("Swap", "swap_offhand"),
     ("Hotbar +", "hotbar_next"),
     ("Hotbar -", "hotbar_prev"),
 )
@@ -665,7 +665,7 @@ _RIGHT_COMMANDS = (
     ("Attack", "attack"),
     ("Use", "use"),
     ("Jump", "jump"),
-    ("Sneak", "sneak"),
+    ("Swap", "swap_offhand"),
     ("Relocalize", "recenter"),
 )
 

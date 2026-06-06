@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from statistics import median
 from typing import Any, Literal
 
 from minecraft_cv.gestures.registry import GestureEvent
@@ -29,9 +30,13 @@ class FaceGestureDetector:
         t_release: float,
         engage_frames: int = 3,
         release_frames: int = 2,
+        secondary_blendshape: str | None = None,
+        combine: Literal["min", "mean"] = "min",
     ) -> None:
         self.name = name
         self.blendshape_name = blendshape_name
+        self.secondary_blendshape = secondary_blendshape
+        self.combine = combine
         self.t_engage = t_engage
         self.t_release = t_release
         self.engage_frames = engage_frames
@@ -41,9 +46,24 @@ class FaceGestureDetector:
         self._consecutive_above = 0
         self._consecutive_below = 0
 
+    def _score(self, result: FaceResult) -> float:
+        """Blendshape signal for this gesture.
+
+        With a ``secondary_blendshape`` the two sides are fused: ``min`` requires *both* sides
+        above threshold (so a one-sided expression never fires — symmetry is enforced), while
+        ``mean`` averages them.
+        """
+        primary = result.blendshapes.get(self.blendshape_name, 0.0)
+        if self.secondary_blendshape is None:
+            return primary
+        secondary = result.blendshapes.get(self.secondary_blendshape, 0.0)
+        if self.combine == "mean":
+            return (primary + secondary) / 2.0
+        return min(primary, secondary)
+
     def update(self, result: FaceResult) -> list[GestureEvent]:
         """Update detector state with new blendshape scores."""
-        score = result.blendshapes.get(self.blendshape_name, 0.0)
+        score = self._score(result)
         events: list[GestureEvent] = []
 
         if self._is_active:
@@ -208,17 +228,22 @@ class HeadPitchDetector:
         release_ratio: float,
         engage_frames: int = 3,
         release_frames: int = 2,
+        warmup_frames: int = 12,
+        neutral_alpha: float = 0.02,
     ) -> None:
         self.gesture = gesture
         self.engage_ratio = engage_ratio
         self.release_ratio = release_ratio
         self.engage_frames = engage_frames
         self.release_frames = release_frames
+        self.warmup_frames = max(1, warmup_frames)
+        self.neutral_alpha = neutral_alpha
 
         self._is_active = False
         self._consecutive_above = 0
         self._consecutive_below = 0
         self._baseline_ratio: float | None = None
+        self._warmup: list[float] = []
 
     @property
     def name(self) -> str:
@@ -231,32 +256,44 @@ class HeadPitchDetector:
         if raw_ratio is None:
             return events
 
+        # Warmup: seed the neutral from the median of a short startup window. The median is
+        # robust to a single non-neutral frame at startup (e.g. the user mid-nod), which the
+        # old single-frame seed turned into a session-long miscalibration ("perfect one run,
+        # buggy the next"). Emit nothing until the baseline is established.
         if self._baseline_ratio is None:
-            self._baseline_ratio = raw_ratio
-        elif not self._is_active:
-            if raw_ratio > self._baseline_ratio:
-                self._baseline_ratio = self._baseline_ratio * 0.5 + raw_ratio * 0.5
-            else:
-                self._baseline_ratio = self._baseline_ratio * 0.99 + raw_ratio * 0.01
+            self._warmup.append(raw_ratio)
+            if len(self._warmup) < self.warmup_frames:
+                return events
+            self._baseline_ratio = float(median(self._warmup))
+            self._warmup.clear()
 
         ratio = raw_ratio / self._baseline_ratio
 
         if self._is_active:
-            if ratio is None or ratio >= self.release_ratio:
+            if ratio >= self.release_ratio:
                 self._consecutive_above += 1
                 if self._consecutive_above >= self.release_frames:
                     self._is_active = False
+                    self._consecutive_above = 0
                     events.append(GestureEvent(self.gesture, KEY_UP, "face"))
             else:
                 self._consecutive_above = 0
         else:
-            if ratio is not None and ratio <= self.engage_ratio:
+            if ratio <= self.engage_ratio:
                 self._consecutive_below += 1
                 if self._consecutive_below >= self.engage_frames:
                     self._is_active = True
+                    self._consecutive_below = 0
                     events.append(GestureEvent(self.gesture, KEY_DOWN, "face"))
             else:
                 self._consecutive_below = 0
+                # Drift the neutral toward the user's true rest pose with a slow, *symmetric*
+                # EMA, but only while clearly in the neutral/up zone (ratio >= release_ratio).
+                # Symmetric + gated means a transient glance up can no longer ratchet the
+                # engage point away (which is what forced the user to hold their head ever
+                # higher). The hysteresis band itself never adapts.
+                if ratio >= self.release_ratio:
+                    self._baseline_ratio += self.neutral_alpha * (raw_ratio - self._baseline_ratio)
 
         return events
 
@@ -289,6 +326,8 @@ class FaceGestureStateMachine:
                 t_release=config.t_release,
                 engage_frames=config.engage_frames,
                 release_frames=config.release_frames,
+                secondary_blendshape=getattr(config, "secondary_blendshape", None),
+                combine=getattr(config, "combine", "min"),
             )
             self._detectors.append(detector)
 
@@ -311,6 +350,8 @@ class FaceGestureStateMachine:
                 release_ratio=head_pitch.release_ratio,
                 engage_frames=head_pitch.engage_frames,
                 release_frames=head_pitch.release_frames,
+                warmup_frames=getattr(head_pitch, "warmup_frames", 12),
+                neutral_alpha=getattr(head_pitch, "neutral_alpha", 0.02),
             )
 
         self._last_result = FaceResult()

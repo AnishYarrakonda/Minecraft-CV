@@ -96,6 +96,25 @@ def _finger_label(finger: str) -> str:
     return _FINGER_LABELS.get(finger, finger.title() if finger else "")
 
 
+# Human-readable hints for face-blendshape gestures, keyed by the (primary) blendshape name.
+_BLENDSHAPE_LABELS: dict[str, str] = {
+    "jawOpen": "Open mouth",
+    "browInnerUp": "Raise brows",
+    "mouthSmileLeft": "Smile",
+    "mouthSmileRight": "Smile",
+    "cheekPuff": "Puff cheeks",
+    "mouthPucker": "Pucker lips",
+    "noseSneerLeft": "Scrunch nose",
+    "noseSneerRight": "Scrunch nose",
+}
+
+
+def _blendshape_label(spec: object) -> str:
+    """Describe a face-gesture spec for the HUD (e.g. ``jawOpen`` -> 'Open mouth')."""
+    name = getattr(spec, "blendshape", "")
+    return _BLENDSHAPE_LABELS.get(name, name)
+
+
 def build_keymap(settings: Settings) -> list[KeyRow]:
     """Build the ordered list of key rows to display, in config order, left hand then right.
 
@@ -121,13 +140,18 @@ def build_keymap(settings: Settings) -> list[KeyRow]:
             binding = bindings.get(gesture)
             if binding is None:
                 continue
+            descriptor = (
+                _blendshape_label(spec)
+                if hand == "face"
+                else _finger_label(getattr(spec, "finger", ""))
+            )
             rows.append(
                 KeyRow(
                     gesture=gesture,
                     name=display_name(gesture),
                     key=key_label(binding),
                     hand=hand,
-                    finger=_finger_label(getattr(spec, "finger", "")),
+                    finger=descriptor,
                 )
             )
 

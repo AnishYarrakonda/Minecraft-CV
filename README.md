@@ -121,8 +121,7 @@ other camera apps and confirm you're on Apple Silicon (CPU path targets 30 fps).
 
 | Command | Description |
 |---|---|
-| `mcv ui` | Polished desktop app (recommended) |
-| `mcv overlay` | Compact always-on-top HUD that stays in front of Minecraft, even fullscreen |
+| `mcv ui` | Polished desktop app (recommended). Camera on top, compact key grid below. **Pin** keeps it in front of Minecraft (even fullscreen); shrink it short to collapse into a camera-only HUD |
 | `mcv run` | Headless controller (`--input` live, `--no-input` dry-run) |
 | `mcv doctor` | Check camera, permissions, and system health |
 | `mcv analyze <clip>` | Run a recorded clip through the pipeline offline |

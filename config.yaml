@@ -97,29 +97,40 @@ gestures:
       t_engage: 0.5
       t_release: 0.3
       engage_frames: 3
+    sneak:
+      blendshape: jawOpen  # open mouth (held) -> shift; close mouth to release
+      t_engage: 0.5
+      t_release: 0.3
+      engage_frames: 3
+      release_frames: 2
     throw_item:
-      blendshape: jawOpen  # open mouth -> Q
-      t_engage: 0.6
-      t_release: 0.35
+      blendshape: mouthSmileLeft   # big symmetric smile -> Q
+      secondary_blendshape: mouthSmileRight
+      combine: min                 # both corners required; a one-sided smirk won't fire
+      t_engage: 0.5
+      t_release: 0.3
       engage_frames: 2
   # Head roll (ear-to-shoulder) -> hotbar scroll. Swap left/right gesture names if the
   # mirrored feed inverts the direction.
   head_tilt:
     enabled: true
-    left_gesture: hotbar_next   # roll toward left shoulder  -> scroll up
-    right_gesture: hotbar_prev  # roll toward right shoulder -> scroll down
+    left_gesture: hotbar_prev   # roll toward left shoulder  -> scroll down
+    right_gesture: hotbar_next  # roll toward right shoulder -> scroll up
     engage_deg: 12.0
     release_deg: 7.0
     engage_frames: 2
     release_frames: 2
-  # Head pitch (nodding down) -> sneak.
+  # Head pitch (nodding down) -> sneak. Disabled: sneak is now the open-mouth (jawOpen) face
+  # gesture above. Flip enabled: true to switch back to head-nod sneak.
   head_pitch:
-    enabled: true
+    enabled: false
     gesture: sneak
     engage_ratio: 0.85
     release_ratio: 0.92
     engage_frames: 3
     release_frames: 2
+    warmup_frames: 12
+    neutral_alpha: 0.02
 
 face_tracking:
   enabled: true

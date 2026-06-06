@@ -1,11 +1,12 @@
-"""Native macOS window-level helpers for Qt overlay windows.
+"""Native macOS window-level helpers for Qt windows that pin in front of games.
 
 Qt's ``WindowStaysOnTopHint`` only raises a window to ``NSFloatingWindowLevel`` and,
 for ``Qt.Tool`` windows, AppKit hides the window when its app is deactivated. Neither
-keeps a small HUD reliably in front of a focused or fullscreen game. This module reaches
-the underlying ``NSWindow`` (via pyobjc) to pin it above other apps, including separate
-fullscreen Spaces. All pyobjc imports are lazy and guarded so the module is a no-op on
-non-macOS platforms and when the native handles are unavailable.
+keeps a HUD reliably in front of a focused or fullscreen game. This module reaches the
+underlying ``NSWindow`` (via pyobjc) to pin it above other apps, including separate
+fullscreen Spaces (:func:`keep_window_in_front`), and to undo that pinning
+(:func:`reset_window_level`). All pyobjc imports are lazy and guarded so the module is a
+no-op on non-macOS platforms and when the native handles are unavailable.
 """
 
 from __future__ import annotations
@@ -61,4 +62,34 @@ def keep_window_in_front(widget: QWidget) -> None:
         pass
 
 
-__all__ = ["keep_window_in_front"]
+def reset_window_level(widget: QWidget) -> None:
+    """Undo :func:`keep_window_in_front`: return the window to its normal level and behavior.
+
+    Restores the default ``NSWindowLevel`` and collection behavior so an unpinned window stops
+    floating above other apps and fullscreen Spaces. No-op on non-macOS platforms or if pyobjc /
+    the native window handle is unavailable.
+
+    Args:
+        widget: A shown top-level Qt widget whose native ``NSWindow`` should be reset.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import objc
+        from AppKit import (  # type: ignore[import-untyped]
+            NSNormalWindowLevel,
+            NSWindowCollectionBehaviorDefault,
+        )
+
+        view = objc.objc_object(c_void_p=int(widget.winId()))  # NSView*
+        ns_window = view.window()
+        if ns_window is None:
+            return
+        ns_window.setLevel_(NSNormalWindowLevel)
+        ns_window.setCollectionBehavior_(NSWindowCollectionBehaviorDefault)
+        ns_window.setHidesOnDeactivate_(False)
+    except Exception:  # pragma: no cover - defensive native bridge
+        pass
+
+
+__all__ = ["keep_window_in_front", "reset_window_level"]
