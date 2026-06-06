@@ -9,11 +9,11 @@
 
 ## Demo
 
-![Demo clip 1](assets/demo/part2.gif)
+<p align="center"><img src="assets/demo/part2.gif" alt="Demo clip 1"/></p>
 
-![Demo clip 2](assets/demo/part3.gif)
+<p align="center"><img src="assets/demo/part3.gif" alt="Demo clip 2"/></p>
 
-![Demo clip 3](assets/demo/part4.gif)
+<p align="center"><img src="assets/demo/part4.gif" alt="Demo clip 3"/></p>
 
 ---
 
