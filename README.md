@@ -9,24 +9,11 @@
 
 ## Demo
 
-<table>
-  <tr>
-    <td><img src="assets/demo/part1.gif" alt="Demo part 1"/></td>
-    <td><img src="assets/demo/part2.gif" alt="Demo part 2"/></td>
-  </tr>
-  <tr>
-    <td><img src="assets/demo/part3.gif" alt="Demo part 3"/></td>
-    <td><img src="assets/demo/part4.gif" alt="Demo part 4"/></td>
-  </tr>
-  <tr>
-    <td><img src="assets/demo/part5.gif" alt="Demo part 5"/></td>
-    <td><img src="assets/demo/part6.gif" alt="Demo part 6"/></td>
-  </tr>
-  <tr>
-    <td><img src="assets/demo/part7.gif" alt="Demo part 7"/></td>
-    <td><img src="assets/demo/part8.gif" alt="Demo part 8"/></td>
-  </tr>
-</table>
+![Demo clip 1](assets/demo/part2.gif)
+
+![Demo clip 2](assets/demo/part3.gif)
+
+![Demo clip 3](assets/demo/part4.gif)
 
 ---
 
